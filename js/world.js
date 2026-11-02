@@ -79,7 +79,9 @@ export class World {
     }
     this.pile = new THREE.Group(); S.add(this.pile);
     this.pileCards = [];
-    this.revealCards = [];
+    this.revealCards = []; this.revealFloat = false;
+    // 動いている途中のカード（テーブル直下）を管理。ここにも公開カードにも属さないカードは自動で消す
+    this.transient = new Set(); this.pileLocks = new Set(); this.tableTok = 0; this.strayT = 0;
     // viewmodel
     this.vm = new THREE.Group(); this.camera.add(this.vm);
     this.handCards = []; this.handKey = ''; this.selected = new Set();
@@ -266,8 +268,13 @@ export class World {
     this.tweens.forEach(t => t.res()); this.tweens = [];
     this.mode = mode;
     this.ghost = false;
+    this.tableTok++;
+    this.handBusy = false; this.handHide = 0; this.handKey = '';
+    this.pileLocks.clear();
+    this.dropTransient();
     this.clearPile();
     this.clearReveal();
+    this.sweepStray();
     for (const s of this.seats) {
       if (s.av) s.av.reset();
       s.busy = 0; s.visualDead = false; s.deadKind = null; s.vialsLeft = 2;
@@ -316,10 +323,16 @@ export class World {
         }
       }
     }
-    // pile
-    if (!this.pileBusy && md === 'card') {
-      const want = st.ph === 'lobby' ? 0 : (st.pile || 0);
-      if (this.pileCards.length !== want && !this.revealCards.length) this.setPileCount(want);
+    // pile（公開中のカードは山から抜いてあるので、その分を引いた枚数に合わせる）
+    if (md === 'card' || st.ph === 'lobby') {
+      // 公開カードが残ってよいのは「告発〜撃つ〜結果」の間だけ。それ以外の場面で残っていたら消す
+      const noReveal = st.ph === 'lobby' || st.ph === 'deal' || st.ph === 'turn';
+      if (noReveal && this.revealCards.length) this.clearReveal();
+      if (!this.pileBusy) {
+        const want = st.ph === 'lobby' ? 0 : Math.max(0, (st.pile || 0) - this.revealCards.length);
+        if (this.pileCards.length !== want) this.setPileCount(want);
+      }
+      if (st.ph === 'lobby' && !this.pileBusy) this.sweepStray(true);
     }
     // own hand
     const myP = this.mySeat >= 0 ? st.pl[this.mySeat] : null;
@@ -346,7 +359,22 @@ export class World {
 
   // ---------- pile ----------
   clearPile() { this.pileCards.forEach(c => this.pile.remove(c)); this.pileCards = []; }
-  clearReveal() { this.revealCards.forEach(c => this.scene.remove(c)); this.revealCards = []; }
+  clearReveal() { this.revealCards.forEach(c => { if (c.parent) c.parent.remove(c); }); this.revealCards = []; this.revealFloat = false; }
+  get pileBusy() { return this.pileLocks.size > 0; }
+  lockPile() { const k = {}; this.pileLocks.add(k); return () => this.pileLocks.delete(k); }
+  // テーブル上を動かすカード：今のラウンド(tok)の印を付けて登録
+  track(c, tok = this.tableTok) { c.userData.tok = tok; this.transient.add(c); if (c.parent !== this.scene) this.scene.add(c); return c; }
+  untrack(c) { this.transient.delete(c); if (c.parent) c.parent.remove(c); }
+  dropTransient() { this.transient.forEach(c => { if (c.parent) c.parent.remove(c); }); this.transient.clear(); }
+  // 山・公開・移動中のどれにも属さないカードを消す（取り残し防止の安全網）
+  sweepStray(all = false) {
+    for (const o of this.scene.children.slice()) {
+      if (!o.userData || !o.userData.front) continue;
+      if (this.revealCards.includes(o)) continue;
+      if (!all && this.transient.has(o) && o.userData.tok === this.tableTok) continue;
+      this.transient.delete(o); this.scene.remove(o);
+    }
+  }
   pileSpot(k) {
     const a = (k * 2.39996) % 6.283;
     const r = 0.02 + (k % 5) * 0.012;
@@ -510,18 +538,21 @@ export class World {
   isMe(i) { return i === this.mySeat; }
 
   async evRound(ev) {
-    const g = this.gen;
-    this.clearReveal();
-    // sweep old pile
-    const old = this.pileCards.slice(); this.pileCards = [];
+    const g = this.gen, tok = ++this.tableTok;
+    // 前のラウンドのアニメーションが遅れて残っていても、ここで全部片付ける
+    this.transient.forEach(c => { if (c.userData.tok !== tok) this.untrack(c); });
+    this.pileLocks.clear();
+    // sweep old pile + revealed cards together
+    const old = this.pileCards.concat(this.revealCards); this.pileCards = []; this.revealCards = []; this.revealFloat = false;
     if (old.length) {
-      this.pileBusy = true;
-      const from = old.map(c => c.position.clone());
-      await this.tween(0.45, e => { old.forEach((c, k) => { c.position.set(from[k].x * (1 - e), from[k].y + e * 0.05, from[k].z * (1 - e)); c.scale.setScalar(1 - e * 0.9); }); });
-      old.forEach(c => this.pile.remove(c));
-      this.pileBusy = false;
+      const unlock = this.lockPile();
+      old.forEach(c => { const wp = c.getWorldPosition(new THREE.Vector3()); c.position.copy(wp); this.track(c, tok); });
+      const from = old.map(c => c.position.clone()), s0 = old.map(c => c.scale.x);
+      await this.tween(0.45, e => { old.forEach((c, k) => { c.position.set(from[k].x * (1 - e), from[k].y + e * 0.05, from[k].z * (1 - e)); c.scale.setScalar(s0[k] * (1 - e * 0.9)); }); });
+      old.forEach(c => this.untrack(c));
+      unlock();
     }
-    if (!this.alive(g)) return;
+    if (!this.alive(g) || tok !== this.tableTok) return;
     this.bigText(`${CARD_LABEL[ev.tc]} のテーブル`, 'gold', 2.0);
     // deal: cards fly from center to each alive player
     this.handHide = 1; this.handBusy = true;
@@ -535,7 +566,7 @@ export class World {
       const to = i === this.mySeat ? this.camera.localToWorld(new THREE.Vector3(0, -0.25, -0.4)) : s.av.held.getWorldPosition(new THREE.Vector3());
       for (let k = 0; k < 5; k++) {
         const c = Models.card(null); c.position.copy(CENTER); c.rotation.set(-Math.PI / 2, 0, Math.random() * 6);
-        this.scene.add(c);
+        this.track(c, tok);
         fly.push({ c, to, delay: k * 0.09 + i * 0.03 });
       }
     }
@@ -547,7 +578,8 @@ export class World {
         f.c.visible = t < 1;
       });
     }, Ease.lin);
-    fly.forEach(f => this.scene.remove(f.c));
+    fly.forEach(f => this.untrack(f.c));
+    if (tok !== this.tableTok) return; // 次のラウンドがもう始まっている（その処理に任せる）
     this.handBusy = false; this.handKey = '';
     if (this.priv) this.sync(this.st, this.priv);
     await this.tween(0.35, e => { this.handHide = 1 - e; });
@@ -555,7 +587,7 @@ export class World {
   }
 
   async evPlay(ev) {
-    const g = this.gen;
+    const g = this.gen, tok = this.tableTok;
     const s = this.seats[ev.s];
     Snd.card();
     let from;
@@ -576,13 +608,13 @@ export class World {
       from = Array.from({ length: ev.n }, () => hp.clone());
       setTimeout(() => { s.busy = Math.max(0, s.busy - 1); }, 700);
     } else from = Array.from({ length: ev.n }, () => CENTER.clone());
-    this.pileBusy = true;
+    const unlock = this.lockPile();
     const cards = [];
     for (let k = 0; k < ev.n; k++) {
       const c = Models.card(null);
       const spot = this.pileSpot(this.pileCards.length + k);
       c.userData.spot = spot; c.position.copy(from[k]);
-      this.scene.add(c); cards.push(c);
+      this.track(c, tok); cards.push(c);
     }
     const starts = cards.map(c => c.position.clone());
     await this.tween(0.5, (e) => {
@@ -593,10 +625,15 @@ export class World {
         c.rotation.set(lerp(0, -Math.PI / 2, t), 0, lerp(0, sp.ry, t));
       });
     }, Ease.out);
-    cards.forEach(c => this.scene.remove(c));
-    if (!this.alive(g)) { this.pileBusy = false; return; }
+    cards.forEach(c => this.untrack(c));
+    if (!this.alive(g) || tok !== this.tableTok) { unlock(); return; }
     for (let k = 0; k < ev.n; k++) this.addPileCard(null);
-    this.pileBusy = false;
+    unlock();
+    // 実際の枚数に合わせ直す（遅れて届いた場合のずれを防ぐ）
+    if (this.st && this.st.md === 'card' && !this.pileBusy && this.st.ph === 'turn') {
+      const want = Math.max(0, (this.st.pile || 0) - this.revealCards.length);
+      if (this.pileCards.length !== want) this.setPileCount(want);
+    }
     Snd.card();
   }
 
@@ -620,21 +657,17 @@ export class World {
     }
   }
 
-  async evLiar(ev) {
-    const g = this.gen;
-    this.slamBy(ev.s);
-    await this.wait(1.0);
-    if (!this.alive(g)) return;
-    // flip the last n cards
-    this.pileBusy = true;
-    const n = ev.cards.length;
-    const take = this.pileCards.splice(this.pileCards.length - n, n);
-    take.forEach(c => { const wp = c.getWorldPosition(new THREE.Vector3()); this.pile.remove(c); c.position.copy(wp); this.scene.add(c); });
-    while (take.length < n) { const c = Models.card(null); c.position.copy(CENTER); this.scene.add(c); take.push(c); }
-    take.forEach((c, k) => c.setFace(ev.cards[k]));
+  // 山の最後の n 枚を抜いて、自分の目の前に浮かせて表を見せる（各プレイヤーが自分の方向に向けて見る）
+  async liftReveal(faces, tok) {
+    const unlock = this.lockPile();
+    this.clearReveal();
+    const n = faces.length;
+    const take = this.pileCards.splice(Math.max(0, this.pileCards.length - n), n);
+    take.forEach(c => { const wp = c.getWorldPosition(new THREE.Vector3()); c.position.copy(wp); this.track(c, tok); });
+    while (take.length < n) { const c = Models.card(null); c.position.copy(CENTER); c.rotation.set(-Math.PI / 2, 0, 0); this.track(c, tok); take.push(c); }
+    take.forEach((c, k) => c.setFace(faces[k]));
     const starts = take.map(c => c.position.clone());
-    const startQ = take.map(c => { const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.PI / 2, 0, c.rotation.z)); return q; });
-    // each viewer sees the revealed cards floating over the table, turned toward their own eyes
+    const startQ = take.map(c => new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.PI / 2, 0, c.rotation.z)));
     const camPos = this.camera.getWorldPosition(new THREE.Vector3());
     const toCam = camPos.clone().sub(CENTER); toCam.y = 0; toCam.normalize();
     const right = new THREE.Vector3(0, 1, 0).cross(toCam).normalize();
@@ -651,9 +684,48 @@ export class World {
         c.scale.setScalar(1 + e * big);
       });
     });
-    this.revealCards = take;
-    this.pileBusy = false;
-    if (!this.alive(g)) return;
+    if (tok !== this.tableTok || !take.every(c => this.transient.has(c))) {
+      // 途中で次のラウンド/ゲームに進んだ → このカードは捨てる
+      take.forEach(c => this.untrack(c)); unlock(); return null;
+    }
+    take.forEach(c => this.transient.delete(c));
+    this.clearReveal();
+    this.revealCards = take; this.revealFloat = true;
+    unlock();
+    return take;
+  }
+
+  // 見せ終わったら、邪魔にならないよう自分の手前のテーブルに表向きで並べて置く
+  async layDownReveal(take, tok) {
+    if (!take || this.revealCards !== take || tok !== this.tableTok) return;
+    this.revealFloat = false;
+    const n = take.length;
+    const camPos = this.camera.getWorldPosition(new THREE.Vector3());
+    const toCam = camPos.clone().sub(CENTER); toCam.y = 0; toCam.normalize();
+    const right = new THREE.Vector3(0, 1, 0).cross(toCam).normalize();
+    const base = CENTER.clone().addScaledVector(toCam, 0.21);
+    const gap = CARD_W * 1.18;
+    const endQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 2, 0, Math.atan2(toCam.x, toCam.z)));
+    const starts = take.map(c => c.position.clone()), startQ = take.map(c => c.quaternion.clone()), s0 = take.map(c => c.scale.x);
+    const targets = take.map((c, k) => { const v = base.clone().addScaledVector(right, (k - (n - 1) / 2) * gap); v.y = 0.79 + k * 0.0004; return v; });
+    await this.tween(0.6, e => {
+      if (this.revealCards !== take) return;
+      take.forEach((c, k) => {
+        c.position.lerpVectors(starts[k], targets[k], e); c.position.y += Math.sin(e * Math.PI) * 0.03;
+        c.quaternion.slerpQuaternions(startQ[k], endQ, e);
+        c.scale.setScalar(lerp(s0[k], 1, e));
+      });
+    });
+  }
+
+  async evLiar(ev) {
+    const g = this.gen, tok = this.tableTok;
+    this.slamBy(ev.s);
+    await this.wait(1.0);
+    if (!this.alive(g) || tok !== this.tableTok) return;
+    // flip the last n cards
+    const take = await this.liftReveal(ev.cards, tok);
+    if (!take || !this.alive(g)) return;
     // mark each card
     take.forEach((c, k) => {
       const ok = ev.cards[k] === ev.tc || ev.cards[k] === 'J';
@@ -662,40 +734,27 @@ export class World {
       this.tween(0.4, e => { ring.material.opacity = e * 0.7; });
     });
     await this.wait(0.5);
-    if (!this.alive(g)) return;
+    if (!this.alive(g) || tok !== this.tableTok) return;
     const loser = this.name(ev.lo);
     this.bigText(ev.lie ? `嘘だった！ → ${loser}` : `本物だった！ → ${loser}`, ev.lie ? 'red' : 'green', 2.2);
+    await this.wait(2.4);
+    if (!this.alive(g)) return;
+    await this.layDownReveal(take, tok);
   }
 
   // あがり: 出し切った最後のカードを表にして見せる
   async evAgari(ev) {
-    const g = this.gen;
+    const g = this.gen, tok = this.tableTok;
     Snd.win();
     this.bigText('あがり！', 'gold', 2.0);
     await this.wait(0.6);
-    if (!this.alive(g)) return;
-    this.pileBusy = true;
-    const n = ev.cards.length;
-    const take = this.pileCards.splice(Math.max(0, this.pileCards.length - n), n);
-    take.forEach(c => { const wp = c.getWorldPosition(new THREE.Vector3()); this.pile.remove(c); c.position.copy(wp); this.scene.add(c); });
-    while (take.length < n) { const c = Models.card(null); c.position.copy(CENTER); this.scene.add(c); take.push(c); }
-    take.forEach((c, k) => c.setFace(ev.cards[k]));
-    const starts = take.map(c => c.position.clone());
-    const startQ = take.map(c => new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.PI / 2, 0, c.rotation.z)));
-    const camPos = this.camera.getWorldPosition(new THREE.Vector3());
-    const toCam = camPos.clone().sub(CENTER); toCam.y = 0; toCam.normalize();
-    const right = new THREE.Vector3(0, 1, 0).cross(toCam).normalize();
-    const mid = CENTER.clone().addScaledVector(toCam, 0.12); mid.y = 0.97;
-    const gapX = n > 3 ? 0.13 : 0.17, big = n > 3 ? 0.65 : 1.0;
-    const targets = take.map((c, k) => mid.clone().addScaledVector(right, (k - (n - 1) / 2) * gapX));
-    const look = new THREE.Object3D(); look.position.copy(mid); look.lookAt(camPos.x, camPos.y, camPos.z);
-    Snd.flip();
-    await this.tween(0.75, e => {
-      take.forEach((c, k) => { c.position.lerpVectors(starts[k], targets[k], e); c.position.y += Math.sin(e * Math.PI) * 0.08; c.quaternion.slerpQuaternions(startQ[k], look.quaternion, e); c.scale.setScalar(1 + e * big); });
-    });
-    this.revealCards = take; this.pileBusy = false;
-    if (!this.alive(g)) return;
+    if (!this.alive(g) || tok !== this.tableTok) return;
+    const take = await this.liftReveal(ev.cards, tok);
+    if (!take || !this.alive(g)) return;
     this.bigText(ev.lie ? `ハッタリで あがり！ → ${this.name(ev.s)}` : `あがり！ → ${this.name(ev.s)}`, 'gold', 2.4);
+    await this.wait(2.8);
+    if (!this.alive(g)) return;
+    await this.layDownReveal(take, tok);
   }
 
   enterGhost() {
@@ -1229,8 +1288,10 @@ export class World {
   }
 
   // ---------- frame ----------
-  update(dt) {
-    if (this.paused) dt = 0;
+  update(dt, rawDt = dt) {
+    if (this.paused) { dt = 0; rawDt = 0; }
+    // 演出は実時間で進める（重い端末やアプリ復帰時に、ゲームの進行より演出が遅れてカードが取り残されないように）
+    const tdt = Math.min(Math.max(dt, rawDt), 2);
     this.time += dt;
     const need = this.seats.find(s => s.wantAv);
     if (need) {
@@ -1242,13 +1303,15 @@ export class World {
     for (let i = this.tweens.length - 1; i >= 0; i--) {
       const tw = this.tweens[i];
       if (tw.gen !== this.gen) { this.tweens.splice(i, 1); tw.res(); continue; }
-      tw.t += dt;
+      tw.t += tdt;
       const raw = clamp(tw.t / tw.dur, 0, 1);
       try { tw.fn(tw.ease(raw), tw.t); } catch (e) { console.error(e); }
       if (raw >= 1) { this.tweens.splice(i, 1); tw.res(); }
     }
     for (const s of this.seats) if (s.av) s.av.update(dt);
-    if (this.revealCards.length && !this.pileBusy) this.revealCards.forEach((c, k) => { c.position.y = 0.97 + Math.sin(this.time * 2 + k) * 0.006; });
+    if (this.revealFloat && this.revealCards.length && !this.pileBusy) this.revealCards.forEach((c, k) => { c.position.y = 0.97 + Math.sin(this.time * 2 + k) * 0.006; });
+    // 取り残されたカードの掃除（0.5秒ごと）
+    this.strayT += dt; if (this.strayT > 0.5) { this.strayT = 0; this.sweepStray(); }
     this.updateParticles(dt);
     this.updateHand(dt);
     // lamp flicker

@@ -39,9 +39,9 @@ export const App = {
     setInterval(() => { try { this.logic(); } catch (e) { console.error(e); } }, 80);
     let last = performance.now();
     const loop = (t) => {
-      const dt = Math.max(0, Math.min(0.25, (t - last) / 1000)); last = Math.max(last, t);
+      const rawDt = Math.max(0, (t - last) / 1000), dt = Math.min(0.25, rawDt); last = Math.max(last, t);
       this.fps = this.fps ? this.fps * 0.95 + (1 / Math.max(dt, 0.001)) * 0.05 : 30;
-      try { this.tick(dt); this.autoQuality(dt); } catch (e) { console.error(e); }
+      try { this.tick(dt, rawDt); this.autoQuality(dt); } catch (e) { console.error(e); }
       requestAnimationFrame(loop);
     };
     requestAnimationFrame(loop);
@@ -344,10 +344,10 @@ export const App = {
       if (k !== this.lastHd) { this.lastHd = k; this.net.set({ hd }); }
     }
   },
-  tick(dt) {
+  tick(dt, rawDt = dt) {
     const now = performance.now();
     if (this.st) this.applyLooks(dt);
-    this.world.update(dt);
+    this.world.update(dt, rawDt);
     this.world.render();
     this.updateTimer();
     if (this.st && now - (this._lastSync || 0) > 300) { this._lastSync = now; this.world.sync(this.st, this.priv); this.refreshLabels(); this.updateDock(); }
