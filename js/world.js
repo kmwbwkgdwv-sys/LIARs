@@ -94,7 +94,7 @@ export class World {
     // particles for mist
     this.particles = [];
     // anim
-    this.tweens = []; this.gen = 0; this.time = 0;
+    this.tweens = []; this.gen = 0; this.time = 0; this.fire = {};
     // camera state
     this.mySeat = -1; this.ghost = false;
     this.look = { yaw: 0, pitch: -0.32 };
@@ -283,6 +283,7 @@ export class World {
     this.setOverlay({ black: 0, red: 0, green: 0, flash: 0, vig: 0.35 });
     Snd.stopHeartbeat();
     this.particles.forEach(p => this.scene.remove(p.pts)); this.particles = [];
+    this.fire = {};
   }
   defaultPitch() { return this.camera.aspect < 0.85 ? -0.14 : -0.3; }
   seatLocal(i, x, y, z) { return this.seats[i].g.localToWorld(new THREE.Vector3(x, y, z)); }
@@ -665,6 +666,36 @@ export class World {
     this.bigText(ev.lie ? `嘘だった！ → ${loser}` : `本物だった！ → ${loser}`, ev.lie ? 'red' : 'green', 2.2);
   }
 
+  // あがり: 出し切った最後のカードを表にして見せる
+  async evAgari(ev) {
+    const g = this.gen;
+    Snd.win();
+    this.bigText('あがり！', 'gold', 2.0);
+    await this.wait(0.6);
+    if (!this.alive(g)) return;
+    this.pileBusy = true;
+    const n = ev.cards.length;
+    const take = this.pileCards.splice(Math.max(0, this.pileCards.length - n), n);
+    take.forEach(c => { const wp = c.getWorldPosition(new THREE.Vector3()); this.pile.remove(c); c.position.copy(wp); this.scene.add(c); });
+    while (take.length < n) { const c = Models.card(null); c.position.copy(CENTER); this.scene.add(c); take.push(c); }
+    take.forEach((c, k) => c.setFace(ev.cards[k]));
+    const starts = take.map(c => c.position.clone());
+    const startQ = take.map(c => new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.PI / 2, 0, c.rotation.z)));
+    const camPos = this.camera.getWorldPosition(new THREE.Vector3());
+    const toCam = camPos.clone().sub(CENTER); toCam.y = 0; toCam.normalize();
+    const right = new THREE.Vector3(0, 1, 0).cross(toCam).normalize();
+    const mid = CENTER.clone().addScaledVector(toCam, 0.12); mid.y = 0.97;
+    const targets = take.map((c, k) => mid.clone().addScaledVector(right, (k - (n - 1) / 2) * 0.17));
+    const look = new THREE.Object3D(); look.position.copy(mid); look.lookAt(camPos.x, camPos.y, camPos.z);
+    Snd.flip();
+    await this.tween(0.75, e => {
+      take.forEach((c, k) => { c.position.lerpVectors(starts[k], targets[k], e); c.position.y += Math.sin(e * Math.PI) * 0.08; c.quaternion.slerpQuaternions(startQ[k], look.quaternion, e); c.scale.setScalar(1 + e); });
+    });
+    this.revealCards = take; this.pileBusy = false;
+    if (!this.alive(g)) return;
+    this.bigText(ev.lie ? `ハッタリで あがり！ → ${this.name(ev.s)}` : `あがり！ → ${this.name(ev.s)}`, 'gold', 2.4);
+  }
+
   enterGhost() {
     this.ghost = true;
     const s = this.seats[this.mySeat];
@@ -720,6 +751,17 @@ export class World {
     return m;
   }
 
+  // 引き金の結果（ホストが引き金の瞬間に送る）を待つ。届くまで震え続ける
+  waitFire(seat, n) {
+    const f = this.fire[seat];
+    if (f && f.n === n && f.fatal !== undefined) { delete this.fire[seat]; return Promise.resolve(f.fatal); }
+    return new Promise(res => { this.fire[seat] = { n, res }; });
+  }
+  evFire(ev) {
+    const f = this.fire[ev.s];
+    if (f && f.n === ev.n && f.res) { delete this.fire[ev.s]; f.res(ev.fatal); }
+    else this.fire[ev.s] = { n: ev.n, fatal: ev.fatal };
+  }
   async evShot(ev) {
     const g = this.gen;
     const s = this.seats[ev.s];
@@ -768,10 +810,13 @@ export class World {
     await this.tween(1.75, e => { av.pose.shake = 0.01 + e * 0.025; av.pose.hPitch = -0.1 * e; });
     Snd.stopHeartbeat();
     if (!this.alive(g)) return;
+    av.pose.shake = 0.035;
+    const fatal = await this.waitFire(ev.s, ev.n);
+    if (!this.alive(g)) return;
     av.pose.shake = 0;
     G.trigger.rotation.x = -0.35; G.hammer.rotation.x = 0;
     const muzzle = gun.localToWorld(new THREE.Vector3(0, 0.05, 0.195));
-    if (!ev.fatal) {
+    if (!fatal) {
       Snd.dryFire();
       av.pose.hRoll = 0.4; av.pose.lean = -0.1;
       await this.tween(0.3, e => { av.pose.hRoll = lerp(0.4, 0.14, e); av.pose.lean = lerp(-0.1, 0, e); });
@@ -836,7 +881,7 @@ export class World {
     this.setOverlay({ vig: 0.5 });
     await go(low, hold, 0.8, Ease.out);
     if (!this.alive(g)) return;
-    // シリンダーを振り出す（弾が1発だけ入っているのが見える）
+    // シリンダーを振り出す（6発とも同じ見た目。どれが実弾かは分からない）
     Snd.swing();
     vl.visible = true; vl.position.set(-0.25, -0.5, -0.36);
     await Promise.all([
@@ -874,9 +919,12 @@ export class World {
     await this.tween(0.8, e => { this.fx.shake = 0.006 + e * 0.012; });
     Snd.stopHeartbeat();
     if (!this.alive(g)) return;
+    this.fx.shake = 0.018;
+    const fatal = await this.waitFire(ev.s, ev.n);
+    if (!this.alive(g)) return;
     this.fx.shake = 0;
     G.trigger.rotation.x = -0.35; G.hammer.rotation.x = 0;
-    if (!ev.fatal) {
+    if (!fatal) {
       Snd.dryFire();
       this.shakeCam(0.05, 0.3);
       this.fx.roll = 0.04;

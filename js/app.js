@@ -477,6 +477,7 @@ export const App = {
     switch (ev.t) {
       case 'start':
         $('#quick').classList.add('hidden');
+        this.feed('席替え！ 今回の席順はランダムです');
         W.resetTable(ev.md); W.setPlayers(st, this.mySeat);
         $('#lobbyScr').classList.add('hidden'); $('#overScr').classList.add('hidden');
         W.look.yaw = 0; W.look.pitch = W.defaultPitch();
@@ -487,9 +488,11 @@ export const App = {
       case 'liar': W.evLiar(ev); this.feed(`${nm(ev.s)} → ${nm(ev.tg)}「ライアー！」${ev.fz ? '（自動）' : ''}`); this.bubbles = {}; break;
       case 'shot':
         W.evShot(ev);
-        this.feed(`${nm(ev.s)} が引き金に指をかける…`);
         this.feed(`${nm(ev.s)} がシリンダーを回す…`);
-        setTimeout(() => this.feed(ev.fatal ? `💀 ${nm(ev.s)} は死亡した` : `${nm(ev.s)} は生き延びた（残り${6 - ev.n}回）`), 6000);
+        break;
+      case 'fire':
+        W.evFire(ev);
+        this.feed(ev.fatal ? `💀 ${nm(ev.s)} は死亡した` : `${nm(ev.s)} は生き延びた（残り${6 - ev.n}回）`);
         break;
       case 'roll': W.evRoll(ev); this.feed(`ラウンド${ev.rn}: ダイスを振った`); this.bubbles = {}; this.revealInfo = null; break;
       case 'bid': W.evBid(ev); this.feed(`${nm(ev.s)}：「${ev.f}の目が${ev.q}個以上」`); this.bubble(ev.s, `${ev.f}の目 ×${ev.q}`, 60000); break;
@@ -500,20 +503,27 @@ export const App = {
         setTimeout(() => this.feed(ev.fatal ? `💀 ${nm(ev.s)} は死亡した` : `${nm(ev.s)} は耐えた（毒 ${ev.n}/2）`), 3400);
         break;
       case 'leave': W.evLeave(ev); this.feed(`${nm(ev.s)} が切断した`); break;
+      case 'agari':
+        W.evAgari(ev);
+        this.feed(`${nm(ev.by)} はライアーと言わなかった…`);
+        this.feed(`🏆 ${nm(ev.s)} が手札を出し切って あがり！${ev.lie ? '（ハッタリだった）' : ''}`);
+        break;
       case 'over':
         setTimeout(() => {
           if (!this.st || this.st.ph !== 'over') return;
           const w = this.st.w;
           const wn = w >= 0 && this.st.pl[w] ? this.st.pl[w].n : null;
-          $('#overTitle').textContent = wn ? `${wn} の勝利` : '全員死亡';
-          $('#overSub').textContent = w === this.mySeat ? 'あなたが最後まで生き残った！' : (this.mySeat >= 0 ? 'またの挑戦を…' : '');
+          const agari = ev.why === 'agari';
+          $('#overTitle').textContent = wn ? `${wn} の勝利${agari ? '（あがり）' : ''}` : '全員死亡';
+          $('#overSub').textContent = agari ? (w === this.mySeat ? 'カードを出し切って、告発を逃れた！' : '手札を出し切られ、告発しそびれた…')
+            : (w === this.mySeat ? 'あなたが最後まで生き残った！' : (this.mySeat >= 0 ? 'またの挑戦を…' : ''));
           const canCtl = this.role !== 'guest';
           $('#againBtn').classList.toggle('hidden', !canCtl);
           $('#overNote').textContent = canCtl ? '' : 'ホストの操作を待っています…';
           $('#overScr').classList.remove('hidden');
           if (w === this.mySeat) Snd.win();
-          W.bigText(wn ? `${wn} WINS` : 'NO SURVIVORS', 'gold', 2.5);
-        }, ev.w >= 0 ? 1500 : 800);
+          if (ev.why !== 'agari') W.bigText(wn ? `${wn} WINS` : 'NO SURVIVORS', 'gold', 2.5);
+        }, ev.why === 'agari' ? 3400 : (ev.w >= 0 ? 1500 : 800));
         break;
       case 'lobby':
         W.resetTable(st.md); W.setPlayers(st, this.mySeat);
@@ -731,7 +741,12 @@ export const App = {
     const th = $('#turnHint');
     let tip = '';
     if (this.hints) {
-      if (card) tip = st.fz ? '全員の手札が尽きました。最後のカードを告発します' : (st.lp && st.lp.s !== this.mySeat ? `${CARD_LABEL[st.tc]}を1〜3枚選んで出す（嘘でもOK）／疑うなら「ライアー！」` : `${CARD_LABEL[st.tc]}を1〜3枚選んで出す（嘘でもOK）`);
+      if (card) {
+        const prevOut = st.lp && st.lp.s !== this.mySeat && st.pl[st.lp.s] && st.pl[st.lp.s].hc === 0;
+        tip = st.fz ? '全員の手札が尽きました。最後のカードを告発します'
+          : prevOut ? `⚠ ${st.pl[st.lp.s].n} は手札を出し切った！ 出すと相手の「あがり」。疑うなら「ライアー！」`
+          : (st.lp && st.lp.s !== this.mySeat ? `${CARD_LABEL[st.tc]}を1〜3枚選んで出す（嘘でもOK）／疑うなら「ライアー！」` : `${CARD_LABEL[st.tc]}を1〜3枚選んで出す（嘘でもOK）`);
+      }
       else tip = st.fz ? 'これ以上上乗せできません。告発してください' : (st.bid ? '個数を増やせば目は自由／同じ個数なら大きい目に／多すぎると思ったら「ライアー！」' : '「○の目が全員分でX個以上」をベット。1はワイルド');
     }
     th.textContent = tip; th.classList.toggle('hidden', !tip);
@@ -787,7 +802,7 @@ export const App = {
       const li = document.createElement('li');
       if (p) {
         n++;
-        li.innerHTML = `<span class="dot" style="background:${cols[p.c % 4]}"></span><span class="nm"></span>${p.b ? '<span class="tag">CPU</span>' : ''}${i === 0 && this.role !== 'offline' ? '<span class="tag">ホスト</span>' : ''}${i === this.mySeat ? '<span class="tag">あなた</span>' : ''}`;
+        li.innerHTML = `<span class="dot" style="background:${cols[p.c % 4]}"></span><span class="nm"></span>${p.b ? '<span class="tag">CPU</span>' : ''}${p.id === (this.role === 'guest' ? this.hostPeer : this.myId) && this.role !== 'offline' ? '<span class="tag">ホスト</span>' : ''}${i === this.mySeat ? '<span class="tag">あなた</span>' : ''}`;
         li.querySelector('.nm').textContent = p.n;
       } else { li.className = 'empty'; li.innerHTML = '<span class="dot" style="background:#333"></span><span class="nm">空席</span>'; }
       ul.appendChild(li);

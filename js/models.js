@@ -157,6 +157,7 @@ export const Models = {
       bright: new THREE.MeshPhysicalMaterial({ color: 0x8a8d94, metalness: 1, roughness: 0.18, envMapIntensity: 1.8 }),
       hole: new THREE.MeshBasicMaterial({ color: 0x020202 }),
       brass: new THREE.MeshPhysicalMaterial({ color: 0xc9a04a, metalness: 1, roughness: 0.25, envMapIntensity: 1.6 }),
+      lead: new THREE.MeshPhysicalMaterial({ color: 0x5a5856, metalness: 0.6, roughness: 0.5, envMapIntensity: 0.8 }),
       grip: new THREE.MeshPhysicalMaterial({ map: Tex.tex(wood.map), normalMap: Tex.tex(chk, [3, 3], false), normalScale: new THREE.Vector2(0.9, 0.9), roughness: 0.42, clearcoat: 0.5, clearcoatRoughness: 0.3, envMapIntensity: 0.7 }),
     };
     return this._gunMats;
@@ -211,13 +212,11 @@ export const Models = {
       const a = i * Math.PI / 3, af = a + Math.PI / 6;
       const fl = add(new RoundedBoxGeometry(0.0065, 0.0035, 0.026, 2, 0.0015), M.steelD, cyl);
       fl.position.set(Math.cos(af) * 0.0198, Math.sin(af) * 0.0198, 0.002); fl.rotation.z = af + Math.PI / 2;
+      // 6発すべて同じ見た目の薬莢（実弾1発＋空砲5発は外から区別できない → 見た目から当たりは読めない）
       const ch = add(new THREE.CircleGeometry(0.0046, 16), M.hole, cyl); ch.position.set(Math.cos(a) * 0.0125, Math.sin(a) * 0.0125, 0.0237);
-      if (i === 0) {
-        const rim = add(new THREE.CylinderGeometry(0.0056, 0.0056, 0.0016, 18), M.brass, cyl); rim.rotation.x = Math.PI / 2; rim.position.set(Math.cos(a) * 0.0125, Math.sin(a) * 0.0125, -0.0242);
-        const pr = add(new THREE.CircleGeometry(0.0017, 12), M.bright, cyl); pr.rotation.y = Math.PI; pr.position.set(Math.cos(a) * 0.0125, Math.sin(a) * 0.0125, -0.0251);
-      } else {
-        const bh = add(new THREE.CircleGeometry(0.0046, 16), M.hole, cyl); bh.rotation.y = Math.PI; bh.position.set(Math.cos(a) * 0.0125, Math.sin(a) * 0.0125, -0.0237);
-      }
+      const tip = add(new THREE.CircleGeometry(0.0033, 14), M.lead, cyl); tip.position.set(Math.cos(a) * 0.0125, Math.sin(a) * 0.0125, 0.024);
+      const rim = add(new THREE.CylinderGeometry(0.0056, 0.0056, 0.0016, 18), M.brass, cyl); rim.rotation.x = Math.PI / 2; rim.position.set(Math.cos(a) * 0.0125, Math.sin(a) * 0.0125, -0.0242);
+      const pr = add(new THREE.CircleGeometry(0.0017, 12), M.bright, cyl); pr.rotation.y = Math.PI; pr.position.set(Math.cos(a) * 0.0125, Math.sin(a) * 0.0125, -0.0251);
     }
     const star = add(new THREE.CylinderGeometry(0.0062, 0.0062, 0.002, 6), M.bright, cyl); star.rotation.x = Math.PI / 2; star.position.z = -0.0246;
     g.userData = { cyl, crane, hammer: ham, trigger: trig };

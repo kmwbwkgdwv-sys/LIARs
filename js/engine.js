@@ -5,7 +5,7 @@ const DICE_PER = 5;
 export const TIMING = {
   deal: 2600, roll: 2800, turn: 30000, forced: 6000,
   revealCard: 3800, revealDice: 3400, revealDicePer: 2200,
-  shotBlank: 9000, shotFatal: 11800,
+  shotPull: 5800, shotAfterBlank: 3200, shotAfterFatal: 6000,
   drinkSafe: 6600, drinkFatal: 9800,
 };
 
@@ -120,6 +120,11 @@ export class Engine {
 
   start() {
     if (this.phase !== 'lobby' || this.occupied().length < 2) return false;
+    // 席替え: ゲームごとに座る位置（＝順番と隣の人）をランダムにする
+    const players = this.seats.filter(Boolean);
+    const spots = shuffleArr([0, 1, 2, 3], this.rng);
+    this.seats = [null, null, null, null];
+    players.forEach((p, k) => { this.seats[spots[k]] = p; });
     for (const s of this.seats) {
       if (!s) continue;
       Object.assign(s, { alive: true, left: false, shots: 0, poison: 0, hand: [], dice: [] });
@@ -219,6 +224,18 @@ export class Engine {
       const idx = [...new Set(a.i)].filter(n => Number.isInteger(n));
       if (idx.length < 1 || idx.length > 3) return 'count';
       if (idx.some(n => n < 0 || n >= s.hand.length)) return 'idx';
+      // あがり: 直前の人が手札を出し切り、この人が告発せずにカードを出した → 直前の人の勝ち
+      const lp = this.lastPlay;
+      if (lp && lp.seat !== seat) {
+        const prev = this.seats[lp.seat];
+        if (prev && prev.alive && prev.hand.length === 0) {
+          const lie = lp.cards.some(c => c !== this.table && c !== 'J');
+          this.ev({ t: 'agari', s: lp.seat, by: seat, cards: lp.cards.slice(), lie, tc: this.table });
+          this.winner = lp.seat; this.phase = 'over'; this.botAt = 0;
+          this.ev({ t: 'over', w: lp.seat, why: 'agari' });
+          return null;
+        }
+      }
       const cards = idx.map(n => s.hand[n]);
       s.hand = s.hand.filter((_, n) => !idx.includes(n));
       this.lastPlay = { seat, cards };
@@ -295,11 +312,11 @@ export class Engine {
     const now = this.now();
     if (!L || !L.alive) { this.afterPenalty(); return; }
     if (this.mode === 'card') {
-      const fatal = L.shots === L.bullet;
+      // 結果（実弾か空砲か）は引き金を引く瞬間まで誰にも送らない（途中でリロードしても分からない）
+      this.pendingFatal = L.shots === L.bullet;
       L.shots++;
-      if (fatal) { L.alive = false; L.hand = []; }
-      this.ev({ t: 'shot', s: this.loser, fatal, n: L.shots });
-      this.phase = 'shot'; this.phaseEnd = now + (fatal ? this.T.shotFatal : this.T.shotBlank);
+      this.ev({ t: 'shot', s: this.loser, n: L.shots });
+      this.phase = 'shot'; this.shotStage = 1; this.phaseEnd = now + this.T.shotPull;
     } else {
       const fatal = L.poison >= 1;
       L.poison++;
@@ -355,7 +372,19 @@ export class Engine {
       case 'reveal':
         if (now >= this.phaseEnd) this.penalty();
         break;
-      case 'shot': case 'drink':
+      case 'shot':
+        if (now < this.phaseEnd) break;
+        if (this.shotStage === 1) {
+          const L = this.seats[this.loser];
+          if (!L || !L.alive) { this.afterPenalty(); break; }
+          const fatal = !!this.pendingFatal;
+          if (fatal) { L.alive = false; L.hand = []; }
+          this.ev({ t: 'fire', s: this.loser, fatal, n: L.shots });
+          this.shotStage = 2; this.phaseEnd = now + (fatal ? this.T.shotAfterFatal : this.T.shotAfterBlank);
+          this.touch();
+        } else this.afterPenalty();
+        break;
+      case 'drink':
         if (now >= this.phaseEnd) this.afterPenalty();
         break;
     }
@@ -400,7 +429,7 @@ export const Bots = {
       let p = 0.14 + 0.13 * (lp.cards.length - 1) + (good.length / 8) * 0.55;
       if (remainingTrue < lp.cards.length) p = 1;
       const prev = eng.seats[lp.seat];
-      if (prev && prev.hand.length === 0) p += 0.12;
+      if (prev && prev.hand.length === 0) p = Math.max(p + 0.2, 0.72);   // 見逃すと相手の「あがり」
       if (good.length === 0) p += 0.12;
       if (s.hand.length === 0) p = 1;
       if (r() < Math.min(0.95, p)) return { t: 'liar' };

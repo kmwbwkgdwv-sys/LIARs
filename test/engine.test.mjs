@@ -4,7 +4,7 @@ import { Engine } from '../js/engine.js';
 function seeded(seed) { let s = seed >>> 0; return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; }
 let fail = 0;
 const ok = (c, m) => { if (!c) { fail++; console.error('NG:', m); } };
-const stats = { card: { games: 0, rounds: 0, deaths: 0, forced: 0 }, dice: { games: 0, rounds: 0, deaths: 0 } };
+const stats = { card: { games: 0, rounds: 0, deaths: 0, forced: 0, agari: 0 }, dice: { games: 0, rounds: 0, deaths: 0 } };
 
 for (let g = 0; g < 300; g++) {
   const mode = g % 2 ? 'dice' : 'card';
@@ -31,8 +31,10 @@ for (let g = 0; g < 300; g++) {
     for (const ev of e.events) {
       if (ev.i <= seen) continue; seen = ev.i;
       if (ev.t === 'round' || ev.t === 'roll') stats[mode].rounds++;
-      if ((ev.t === 'shot' || ev.t === 'drink') && ev.fatal) stats[mode].deaths++;
+      if ((ev.t === 'fire' || ev.t === 'drink') && ev.fatal) stats[mode].deaths++;
+      if (ev.t === 'shot') ok(!('fatal' in ev), 'no early result');
       if (ev.t === 'liar' && ev.fz) stats.card.forced++;
+      if (ev.t === 'agari') stats.card.agari++;
       if (ev.t === 'dliar') {
         let c = 0; for (const d of ev.dice) if (d) for (const v of d) if (v === ev.f || (ev.f !== 1 && v === 1)) c++;
         ok(c === ev.cnt, 'dice count');
@@ -52,12 +54,44 @@ const t1 = e.turn;
 ok(e.act(t1, { t: 'bid', q: 3, f: 3 }) === 'invalid', 'lower bid rejected');
 ok(e.act(t1, { t: 'bid', q: 3, f: 5 }) === null, 'same count higher face');
 ok(e.act(t1, { t: 'bid', q: 5, f: 5 }) === 'turn', 'wrong turn rejected');
+// 席替え: 開始ごとに席がランダム（キャラクターは本人についていく）
+{
+  const e = new Engine({ rng: seeded(3), now: () => 0 });
+  ['a', 'b', 'c'].forEach(n => e.addPlayer(n, n));
+  const seen = new Set();
+  for (let k = 0; k < 12; k++) {
+    e.start(); ok(e.seats.filter(Boolean).length === 3, 'players kept');
+    seen.add(e.seats.map(s => s ? s.id : '-').join(''));
+    const a = e.seats.find(s => s && s.id === 'a'); ok(a.char === 0, 'character follows player');
+    e.phase = 'over'; e.toLobby();
+  }
+  ok(seen.size > 3, 'seating varies between games');
+}
+// あがり: 手札を出し切った後、次の人が告発せずに出したら勝ち
+{
+  const a = new Engine({ rng: seeded(7), now: () => 0 });
+  a.addPlayer('x', 'x'); a.addPlayer('y', 'y'); a.addPlayer('z', 'z'); a.start();
+  const x = a.seatOf('x'), nx = a.nextAliveAfter(x);
+  a.beginTurn(x); a.seats[x].hand = ['K']; a.table = 'Q';
+  ok(a.act(x, { t: 'play', i: [0] }) === null, 'play last card');
+  ok(a.seats[x].hand.length === 0 && a.phase === 'turn' && a.turn === nx, 'turn passes to next');
+  ok(a.act(nx, { t: 'play', i: [0] }) === null, 'next plays instead of calling');
+  ok(a.phase === 'over' && a.winner === x, 'agari wins');
+  ok(a.events.some(e => e.t === 'agari' && e.s === x && e.lie === true), 'agari event records the (lying) cards');
+  // 告発された場合は通常判定（あがりにならない）
+  const b = new Engine({ rng: seeded(8), now: () => 0 });
+  b.addPlayer('x', 'x'); b.addPlayer('y', 'y'); b.start();
+  const bx = b.seatOf('x'), by = b.seatOf('y');
+  b.beginTurn(bx); b.seats[bx].hand = ['Q']; b.table = 'Q';
+  b.act(bx, { t: 'play', i: [0] });
+  ok(b.act(by, { t: 'liar' }) === null && b.phase === 'reveal' && b.loser === by, 'called liar on true last card → caller loses, no agari');
+}
 // リボルバー: 6回以内に必ず死亡
 for (let k = 0; k < 50; k++) {
   const r = new Engine({ rng: seeded(k + 99), now: () => 0 });
   r.addPlayer('a', 'a'); r.addPlayer('b', 'b'); r.start();
-  const s = r.seats[0]; let shots = 0;
-  while (s.alive && shots < 7) { r.loser = 0; r.phase = 'reveal'; r.penalty(); shots++; r.phase = 'turn'; }
+  const si = r.seatOf('a'), s = r.seats[si]; let shots = 0;
+  while (s.alive && shots < 7) { r.loser = si; r.phase = 'reveal'; r.penalty(); ok(r.events.slice(-1)[0].fatal === undefined, 'shot event hides result'); r.phaseEnd = 0; r.update(); shots++; r.phase = 'turn'; }
   ok(!s.alive && shots <= 6, 'revolver kills within 6 pulls');
 }
 console.log(JSON.stringify(stats));
