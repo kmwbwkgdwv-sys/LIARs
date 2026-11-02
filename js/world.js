@@ -378,19 +378,46 @@ export class World {
     if (this.onSelect) this.onSelect(this.selected);
     this.layoutHand();
   }
+  // 手札の配置: 画面の幅・高さ・セーフエリア（iPhoneのホームバー）から計算し、カードが必ず画面内に収まるようにする
   layoutHand() {
     const n = this.handCards.length;
-    if (!n) return;
+    const H = this.canvas.clientHeight || innerHeight;
+    if (!n) { this.handTopPx = 0; return; }
     const d = 0.42;
     const halfH = d * Math.tan(this.vfov * Math.PI / 360);
     const halfW = halfH * this.camera.aspect;
-    const baseY = -halfH + (this.camera.aspect < 0.85 ? 0.065 : 0.05);
-    const R = 0.42;
-    const sc = clamp(halfW / 0.3, 0.7, 0.92);
+    const portrait = this.camera.aspect < 0.85;
+    const R = 0.42, step = 0.13;
+    // 扇の幅（倍率1のとき）
+    const amax = (n - 1) / 2 * step;
+    const fanW = 2 * Math.sin(amax) * R + CARD_W * Math.cos(amax) + CARD_H * Math.sin(amax);
+    const sc = Math.min((portrait ? 0.9 : 0.6) * 2 * halfW / fanW, (portrait ? 0.2 : 0.27) * 2 * halfH / CARD_H, 1.0);
+    // 一番低いカードの下端（中央カード中心からの距離）
+    let low = 0, high = 0;
+    for (let i = 0; i < n; i++) {
+      const a = (i - (n - 1) / 2) * step;
+      const cy = (Math.cos(a) * R - R) * sc;
+      const ext = (CARD_H / 2 * Math.cos(a) + CARD_W / 2 * Math.abs(Math.sin(a))) * sc;
+      low = Math.min(low, cy - ext); high = Math.max(high, cy + ext);
+    }
+    const pxToW = 2 * halfH / H;
+    const margin = (12 + this.safeBottom()) * pxToW;
+    const baseY = -halfH + margin - low;
     this.handCards.forEach((c, i) => {
-      const a = (i - (n - 1) / 2) * 0.13;
+      const a = (i - (n - 1) / 2) * step;
       c.base = { x: Math.sin(a) * R * sc, y: baseY + (Math.cos(a) * R - R) * sc, z: -d - i * 0.0015, rz: -a * 0.9, sc };
     });
+    this.handCardH = CARD_H * sc;
+    // 手札の上端（画面下からのpx）をCSSに渡し、ボタン類を手札の上に置く
+    this.handTopPx = Math.round((baseY + high + 0.035 * sc + halfH) / pxToW);
+  }
+  safeBottom() {
+    if (this._sb == null || this._sbT !== innerHeight) {
+      const p = document.createElement('div');
+      p.style.cssText = 'position:fixed;bottom:0;height:0;padding-bottom:env(safe-area-inset-bottom,0px);visibility:hidden';
+      document.body.appendChild(p); this._sb = p.offsetHeight || 0; p.remove(); this._sbT = innerHeight;
+    }
+    return this._sb;
   }
   updateHand(dt) {
     const k = 1 - Math.exp(-dt * 14);
@@ -398,7 +425,7 @@ export class World {
     this.vmCards.visible = hasHand;
     if (hasHand && this.handCards[0].base) {
       const b0 = this.handCards[0].base, sc = b0.sc || 0.85;
-      this.vmCards.position.set(-0.03 * sc, b0.y - 0.09 * sc - (this.handDownS || 0) * 0.045 + (this.handHide || 0) * -0.25, b0.z - 0.03);
+      this.vmCards.position.set(-0.03 * sc, b0.y - 0.09 * sc - (this.handDownS || 0) * (this.handCardH || 0.1) * 0.35 + (this.handHide || 0) * -0.25, b0.z - 0.03);
       this.vmCards.scale.setScalar(sc * 0.95);
     }
     for (let i = 0; i < this.handCards.length; i++) {
@@ -409,8 +436,8 @@ export class World {
       const b = c.base;
       this.handDownS = (this.handDownS || 0) + ((this.handDown || 0) - (this.handDownS || 0)) * k * 0.6;
       c.obj.scale.setScalar(b.sc);
-      c.obj.position.set(b.x, b.y + c.lift * 0.032 - this.handDownS * 0.045 + (this.handHide || 0) * -0.25, b.z + c.lift * 0.01);
-      c.obj.rotation.set(-0.28, 0, b.rz);
+      c.obj.position.set(b.x, b.y + c.lift * 0.03 * b.sc - this.handDownS * (this.handCardH || 0.1) * 0.35 + (this.handHide || 0) * -0.25, b.z + c.lift * 0.01);
+      c.obj.rotation.set(-0.2, 0, b.rz);
       c.obj.visible = !(this.handHide >= 0.99);
     }
   }
@@ -943,42 +970,67 @@ export class World {
     }
   }
 
+  // 自分の視線をそのプレイヤーの方へ向ける（演出用。ドラッグで自由に戻せる）
+  lookAtSeat(i, dur = 0.5) {
+    if (this.mySeat < 0) return;
+    const d = (i - this.mySeat + 4) % 4;
+    const ty = d === 1 ? 0.72 : d === 3 ? -0.72 : 0, tp = d === 0 ? -0.62 : -0.32;
+    const y0 = this.look.yaw, p0 = this.look.pitch, g = this.gen;
+    return this.tween(dur, e => { if (this.alive(g)) { this.look.yaw = lerp(y0, ty, e); this.look.pitch = lerp(p0, tp, e); } });
+  }
+  // ダイスの公開: 1人ずつカップを開け、該当する目を1個ずつ数えて発表する
   async evDiceLiar(ev) {
     const g = this.gen;
+    const rep = (o) => { if (this.onDiceReveal) this.onDiceReveal(Object.assign({ ev }, o)); };
     this.slamBy(ev.s);
     await this.wait(1.2);
     if (!this.alive(g)) return;
     this.diceReveal = true;
-    // lift every cup & show dice
-    const lifts = [];
-    for (let i = 0; i < 4; i++) {
+    const match = v => v === ev.f || (ev.f !== 1 && v === 1);
+    // 宣言した本人を最後にして、時計回りに公開
+    const order = [];
+    for (let k = 1; k <= 4; k++) { const i = (ev.tg + k) % 4; if (ev.dice[i]) order.push(i); }
+    rep({ type: 'start', order });
+    let total = 0;
+    for (const i of order) {
       const s = this.seats[i], d = ev.dice[i];
-      if (!d) continue;
-      s.dice.forEach((m, k) => { m.visible = true; m.quaternion.copy(Models.dieQuat(d[k], (k * 1.7) % 1 - 0.5)); m.scale.setScalar(1); m.material.forEach ? null : null; });
-      const p0 = s.cup.position.clone();
-      lifts.push({ s, p0 });
-    }
-    Snd.slam(0.4);
-    await this.tween(0.6, e => {
-      lifts.forEach(({ s, p0 }) => { s.cup.position.set(lerp(p0.x, 0.24, e), p0.y + Math.sin(e * Math.PI) * 0.15, lerp(p0.z, 0.42, e)); });
-    });
-    if (!this.alive(g)) return;
-    // highlight matches seat by seat
-    let shown = 0;
-    for (let i = 0; i < 4; i++) {
-      const s = this.seats[i], d = ev.dice[i];
-      if (!d) continue;
+      this.lookAtSeat(i, 0.45);
+      s.dice.forEach((m, k) => { m.visible = true; m.scale.setScalar(1); m.quaternion.copy(Models.dieQuat(d[k], (k * 1.7) % 1 - 0.5)); });
+      if (i === this.mySeat) s.dice.forEach((m, k) => m.position.set(-0.08 + k * 0.04, 0.796, 0.74 + (k % 2) * 0.02));
+      rep({ type: 'open', seat: i, dice: d });
+      Snd.cupLift();
+      const p0 = s.cup.position.clone(), r0 = s.cup.rotation.x;
+      await this.tween(0.6, e => {
+        s.cup.position.set(lerp(p0.x, i === this.mySeat ? 0.2 : 0.24, e), p0.y + Math.sin(e * Math.PI) * 0.16, lerp(p0.z, i === this.mySeat ? 0.62 : 0.42, e));
+        s.cup.rotation.x = lerp(r0, 0, e);
+      }, Ease.out);
+      if (!this.alive(g)) return;
       const hits = [];
-      d.forEach((v, k) => { if (v === ev.f || (ev.f !== 1 && v === 1)) hits.push(k); });
-      if (hits.length) Snd.clink();
-      hits.forEach(k => { const m = s.dice[k]; this.tween(0.3, e => { m.scale.setScalar(1 + Math.sin(e * Math.PI) * 0.6 + e * 0.25); m.position.y = 0.796 + e * 0.004; }); });
-      shown += hits.length;
-      if (this.onDiceCount) this.onDiceCount(shown, ev);
-      await this.wait(0.45);
+      d.forEach((v, k) => { if (match(v)) hits.push(k); });
+      const gap = hits.length ? Math.min(0.3, 1.0 / hits.length) : 0;
+      if (!hits.length) { Snd.dud(); rep({ type: 'count', seat: i, k: -1, hits: 0, total }); await this.wait(1.0); }
+      for (let h = 0; h < hits.length; h++) {
+        const k = hits[h], m = s.dice[k];
+        total++;
+        Snd.tick(total);
+        this.tween(0.35, e => { m.scale.setScalar(1 + Math.sin(e * Math.PI) * 0.7 + e * 0.3); m.position.y = 0.796 + e * 0.005; });
+        rep({ type: 'count', seat: i, k, hits: h + 1, total });
+        await this.wait(gap);
+        if (!this.alive(g)) return;
+      }
+      if (hits.length) await this.wait(1.0 - gap * hits.length);
+      await this.wait(0.5);
       if (!this.alive(g)) return;
     }
+    // 発表
+    rep({ type: 'final', total });
+    Snd.drumroll(0.9);
+    await this.wait(1.0);
+    if (!this.alive(g)) return;
+    rep({ type: 'done', total });
     const loser = this.name(ev.lo);
-    this.bigText(ev.lie ? `ハッタリ！ → ${loser}` : `宣言通り！ → ${loser}`, ev.lie ? 'red' : 'green', 2.0);
+    (ev.lie ? Snd.stinger : Snd.win).call(Snd);
+    this.bigText(ev.lie ? `実際は${total}個！ハッタリ → ${loser}` : `${total}個！宣言どおり → ${loser}`, ev.lie ? 'red' : 'green', 2.2);
   }
 
   async evDrink(ev) {

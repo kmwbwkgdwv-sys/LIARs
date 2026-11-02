@@ -1,5 +1,5 @@
 // アプリ本体: 画面遷移、ロビー、通信、HUD
-import { $, $$, clamp, randId, lsGet, lsSet, cleanName, dieHTML, CARD_LABEL, CARD_JP, BOT_NAMES } from './util.js';
+import { $, $$, esc, clamp, randId, lsGet, lsSet, cleanName, dieHTML, CARD_LABEL, CARD_JP, BOT_NAMES } from './util.js';
 import { Engine } from './engine.js';
 import { Sec } from './crypto.js';
 import { getRoomCapability, RoomNet } from './net-room.js';
@@ -19,7 +19,15 @@ export const App = {
   async init() {
     this.world = new World($('#c'));
     this.world.onSelect = () => this.updateActions();
-    this.world.onDiceCount = (n, ev) => { $('#tableinfo').innerHTML = `<b>${ev.q}個 × ${dieHTML(ev.f)}</b><span class="sub">実際: ${n}個${n >= ev.q ? ' ✔' : ''}</span>`; };
+    this.world.onDiceReveal = (o) => {
+      const R = this.revealInfo && this.revealInfo.ev === o.ev ? this.revealInfo : (this.revealInfo = { ev: o.ev, rows: {}, order: [], total: 0 });
+      if (o.type === 'start') R.order = o.order;
+      else if (o.type === 'open') R.rows[o.seat] = { dice: o.dice, hl: [], cnt: 0 };
+      else if (o.type === 'count') { const r = R.rows[o.seat]; if (r) { r.cnt = o.hits; if (o.k >= 0) r.hl.push(o.k); r.done = o.k < 0; } R.total = o.total; R.cur = o.seat; this.bubble(o.seat, o.hits ? `+${o.hits}個` : '0個', 6000); }
+      else if (o.type === 'final') { R.final = true; R.cur = -1; }
+      else if (o.type === 'done') R.done = true;
+      this.renderBid();
+    };
     this.bindUI();
     this.name = lsGet('lt_name', '') || ('Player' + Math.floor(Math.random() * 90 + 10));
     $('#nameIn').value = this.name;
@@ -198,7 +206,13 @@ export const App = {
     const fc = $('#faces');
     for (let f = 1; f <= 6; f++) {
       const b = document.createElement('button'); b.innerHTML = dieHTML(f); b.dataset.f = f;
-      b.onclick = () => { this.bidF = f; Snd.click(); this.updateActions(); };
+      b.onclick = () => {
+        this.bidF = f; Snd.click();
+        // その目が今の個数で出せないときは、出せる最小の個数まで自動で上げる（個数を増やせばどの目でもOK）
+        const bid = this.st && this.st.bid;
+        if (bid && !this.validBid(this.bidQ, f)) this.bidQ = Math.min(this.totalDice(), f > bid.f ? Math.max(this.bidQ, bid.q) : Math.max(this.bidQ, bid.q + 1));
+        this.updateActions();
+      };
       fc.appendChild(b);
     }
   },
@@ -293,6 +307,7 @@ export const App = {
     this.world.canSelect = false;
     $('#lobbyScr').classList.add('hidden'); $('#overScr').classList.add('hidden'); $('#hud').classList.add('hidden');
     $('#rulesScr').classList.add('hidden'); $('#menu').classList.add('hidden'); $('#quick').classList.add('hidden');
+    $('#bidBanner').classList.add('hidden'); $('#hud').classList.remove('withBid'); this.revealInfo = null;
     $$('.plabel').forEach(l => l.remove()); this.world.seats.forEach(s => s.label = null);
     this.show('title');
   },
@@ -335,7 +350,7 @@ export const App = {
     this.world.update(dt);
     this.world.render();
     this.updateTimer();
-    if (this.st && now - (this._lastSync || 0) > 300) { this._lastSync = now; this.world.sync(this.st, this.priv); this.refreshLabels(); }
+    if (this.st && now - (this._lastSync || 0) > 300) { this._lastSync = now; this.world.sync(this.st, this.priv); this.refreshLabels(); this.updateDock(); }
   },
 
   // ---------------- host ----------------
@@ -441,7 +456,13 @@ export const App = {
       this.world.resetTable(st.md);
       if (st.ph !== 'lobby' && st.ph !== 'over') { $('#lobbyScr').classList.add('hidden'); }
     }
-    if (!prev || prev.md !== st.md) { if (st.ph === 'lobby') this.world.resetTable(st.md); }
+    if (!prev || prev.md !== st.md) {
+      if (st.ph === 'lobby') {
+        this.world.resetTable(st.md);
+        // モードを切り替えたら、そのモードのかんたん説明（未読なら）に差し替える
+        if (prev && !$('#quick').classList.contains('hidden')) { $('#quick').classList.add('hidden'); this.showQuick(st.md); }
+      }
+    }
     this.world.setPlayers(st, ms);
     if (seatChanged && ms >= 0) { this.world.look.yaw = 0; this.world.look.pitch = this.world.defaultPitch(); }
     if (this.lastEv === null) this.lastEv = st.ev.reduce((m, e) => Math.max(m, e.i), 0);
@@ -455,6 +476,7 @@ export const App = {
     const W = this.world, nm = i => (st.pl[i] ? st.pl[i].n : '?');
     switch (ev.t) {
       case 'start':
+        $('#quick').classList.add('hidden');
         W.resetTable(ev.md); W.setPlayers(st, this.mySeat);
         $('#lobbyScr').classList.add('hidden'); $('#overScr').classList.add('hidden');
         W.look.yaw = 0; W.look.pitch = W.defaultPitch();
@@ -469,9 +491,9 @@ export const App = {
         this.feed(`${nm(ev.s)} がシリンダーを回す…`);
         setTimeout(() => this.feed(ev.fatal ? `💀 ${nm(ev.s)} は死亡した` : `${nm(ev.s)} は生き延びた（残り${6 - ev.n}回）`), 6000);
         break;
-      case 'roll': W.evRoll(ev); this.feed(`ラウンド${ev.rn}: ダイスを振った`); this.bubbles = {}; break;
+      case 'roll': W.evRoll(ev); this.feed(`ラウンド${ev.rn}: ダイスを振った`); this.bubbles = {}; this.revealInfo = null; break;
       case 'bid': W.evBid(ev); this.feed(`${nm(ev.s)}：「${ev.f}の目が${ev.q}個以上」`); this.bubble(ev.s, `${ev.f}の目 ×${ev.q}`, 60000); break;
-      case 'dliar': W.evDiceLiar(ev); this.feed(`${nm(ev.s)} → ${nm(ev.tg)}「ライアー！」`); break;
+      case 'dliar': W.evDiceLiar(ev); this.feed(`${nm(ev.s)} → ${nm(ev.tg)}「ライアー！」`); this.revealInfo = { ev, rows: {}, order: [], total: 0 }; break;
       case 'drink':
         W.evDrink(ev);
         this.feed(`${nm(ev.s)} が毒を飲む…`);
@@ -579,9 +601,9 @@ export const App = {
     const me = this.mySeat >= 0 ? st.pl[this.mySeat] : null;
     // table info
     const ti = $('#tableinfo');
-    if (!inGame) ti.innerHTML = `<b>${st.md === 'card' ? 'カード' : 'ダイス'}</b><span class="sub">${this.role === 'offline' ? 'CPU練習' : 'ロビー ' + this.lobbyId}</span>`;
-    else if (st.md === 'card') ti.innerHTML = st.tc ? `<b>${CARD_LABEL[st.tc]} のテーブル</b><span class="sub">場 ${st.pile}枚${st.lp ? '・直前 ' + (st.pl[st.lp.s] ? st.pl[st.lp.s].n : '') + ' ' + st.lp.n + '枚' : ''}</span>` : '';
-    else if (st.ph !== 'reveal') ti.innerHTML = st.bid ? `<b>${st.bid.q}個 × ${dieHTML(st.bid.f)}</b><span class="sub">${st.pl[st.bid.s] ? st.pl[st.bid.s].n : ''} のベット・1はワイルド</span>` : `<b>ベットなし</b><span class="sub">1はワイルド・全${this.totalDice()}個</span>`;
+    if (!inGame) ti.innerHTML = `<b>${st.md === 'card' ? 'カード' : 'ダイス'}</b><span class="sub">${this.role === 'offline' ? 'CPU練習' : 'ロビー ' + esc(this.lobbyId)}</span>`;
+    else if (st.md === 'card') ti.innerHTML = st.tc ? `<b>${CARD_LABEL[st.tc]} のテーブル</b><span class="sub">場 ${st.pile}枚${st.lp ? '・直前 ' + (st.pl[st.lp.s] ? esc(st.pl[st.lp.s].n) : '') + ' ' + st.lp.n + '枚' : ''}</span>` : '';
+    else ti.innerHTML = `<b>ダイス</b><span class="sub">場に全${this.totalDice()}個・1はワイルド</span>`;
     // turn info
     const tt = $('#turntext'), tinfo = $('#turninfo');
     let txt = '';
@@ -598,7 +620,8 @@ export const App = {
     tinfo.classList.toggle('me', !!myTurn);
     // my stat
     const ms = $('#mystat');
-    if (inGame && me) {
+    if (inGame && me && st.md === 'dice' && me.a && !this.world.ghost) ms.classList.add('hidden');
+    else if (inGame && me) {
       ms.classList.remove('hidden');
       const dead = !me.a || this.world.ghost;
       if (dead && !this.world.seats[this.mySeat].busy) ms.innerHTML = '<span class="big">💀 観戦中</span>';
@@ -609,8 +632,10 @@ export const App = {
     // my dice
     const md = $('#mydice');
     const d = st.md === 'dice' && inGame && me && me.a && this.priv && this.priv.d && this.priv.r === st.rn && st.ph !== 'roll' ? this.priv.d : null;
-    if (d) { md.classList.remove('hidden'); md.innerHTML = d.map(v => dieHTML(v)).join(''); }
+    if (d) { md.classList.remove('hidden'); md.innerHTML = `<span class="ps">☠ ${me.ps}/2</span>` + d.map(v => dieHTML(v)).join(''); }
     else md.classList.add('hidden');
+    this.renderBid();
+    this.updateDock();
     // turn change → reset bid stepper
     const turnKey = st.rn + ':' + st.tu + ':' + (st.bid ? st.bid.q + '-' + st.bid.f : '');
     if (myTurn && turnKey !== this._turnKey) {
@@ -627,6 +652,54 @@ export const App = {
     if (!myTurn) this._turnKey = null;
     this.updateActions();
   },
+  // 自分のダイスで、その目に数えられる個数（1はワイルド）
+  myCount(f) {
+    const st = this.st, d = this.priv && this.priv.d;
+    if (!st || !d || !d.length || this.priv.r !== st.rn) return null;
+    return d.filter(v => v === f || (f !== 1 && v === 1)).length;
+  },
+  // ダイスモードのベット表示（いま「何の目」が「何個以上」か）
+  renderBid() {
+    const st = this.st, el = $('#bidBanner'), hud = $('#hud');
+    const show = st && st.md === 'dice' && ['roll', 'turn', 'reveal', 'drink'].includes(st.ph);
+    el.classList.toggle('hidden', !show); hud.classList.toggle('withBid', !!show);
+    el.classList.remove('ok', 'ng');
+    if (!show) return;
+    const nm = i => esc(st.pl[i] ? st.pl[i].n : '?');
+    const R = this.revealInfo;
+    if (R && (st.ph === 'reveal' || st.ph === 'drink')) {
+      const ev = R.ev;
+      let rows = '';
+      for (const i of R.order || []) {
+        const r = R.rows[i];
+        if (!r) continue;
+        rows += `<div class="bb-row ${R.cur === i ? 'cur' : ''}"><span class="nm">${i === this.mySeat ? 'あなた' : nm(i)}</span><span class="dz">${r.dice.map((v, k) => dieHTML(v, r.hl.includes(k) ? 'hit' : 'miss')).join('')}</span><span class="cnt">${r.cnt ? '+' + r.cnt : (r.done || R.cur !== i ? '0' : '…')}</span></div>`;
+      }
+      el.innerHTML = `<div class="bb-label">${ev.tg === this.mySeat ? 'あなた' : nm(ev.tg)} の宣言</div><div class="bb-main">${dieHTML(ev.f)}<span>が <b>${ev.q}個</b> 以上</span></div>` +
+        (rows ? `<div class="bb-rows">${rows}</div>` : '<div class="bb-sub">ダイスを公開します…</div>') +
+        `<div class="bb-total">合計 <b>${R.total}</b> 個 <small>／宣言 ${ev.q}個</small></div>` +
+        (R.done ? `<div class="bb-res">${ev.lie ? `足りない！ ハッタリ → ${nm(ev.lo)}` : `宣言どおり！ → ${nm(ev.lo)}`}</div>` : (R.final ? '<div class="bb-res wait">結果は…</div>' : ''));
+      if (R.done) el.classList.add(ev.lie ? 'ng' : 'ok');
+      return;
+    }
+    if (st.ph === 'roll') { el.innerHTML = '<div class="bb-main none">ダイスを振っています…</div>'; return; }
+    if (!st.bid) {
+      el.innerHTML = `<div class="bb-label">いまのベット</div><div class="bb-main none">まだありません</div><div class="bb-sub">${st.tu === this.mySeat ? 'あなた' : nm(st.tu)} が最初にベットします</div>`;
+      return;
+    }
+    const { q, f, s } = st.bid;
+    const mine = this.myCount(f);
+    el.innerHTML = `<div class="bb-label">いまのベット（${s === this.mySeat ? 'あなた' : nm(s)}）</div>` +
+      `<div class="bb-main">${dieHTML(f)}<span>が <b>${q}個</b> 以上</span></div>` +
+      `<div class="bb-sub">場のダイス 全${this.totalDice()}個中</div>` +
+      (mine != null ? `<div class="bb-mine">あなたの手元：${dieHTML(f)} ×${mine}${f !== 1 ? '（1をふくむ）' : ''}</div>` : '');
+  },
+  updateDock() {
+    const md = $('#mydice');
+    let dock = this.world.handTopPx || 0;
+    if (md && !md.classList.contains('hidden')) dock = Math.max(dock, md.offsetHeight + 10 + this.world.safeBottom());
+    if (dock !== this._dock) { this._dock = dock; document.documentElement.style.setProperty('--dock-h', dock + 'px'); }
+  },
   validBid(q, f) {
     const st = this.st; if (!st) return false;
     if (q < 1 || q > this.totalDice() || f < 1 || f > 6) return false;
@@ -641,7 +714,7 @@ export const App = {
     const me = this.mySeat >= 0 ? st.pl[this.mySeat] : null;
     const myTurn = st.ph === 'turn' && st.tu === this.mySeat && me && me.a;
     const pending = this.actPending && performance.now() - this.actPending < 3000;
-    this.world.handDown = myTurn ? 0 : (st.ph === 'reveal' || st.ph === 'shot' ? 1.6 : 1);
+    this.world.handDown = (st.ph === 'reveal' || st.ph === 'shot') ? 1 : 0;
     if (!myTurn || pending) {
       acts.classList.add('hidden');
       this.world.canSelect = false;
@@ -659,11 +732,12 @@ export const App = {
     let tip = '';
     if (this.hints) {
       if (card) tip = st.fz ? '全員の手札が尽きました。最後のカードを告発します' : (st.lp && st.lp.s !== this.mySeat ? `${CARD_LABEL[st.tc]}を1〜3枚選んで出す（嘘でもOK）／疑うなら「ライアー！」` : `${CARD_LABEL[st.tc]}を1〜3枚選んで出す（嘘でもOK）`);
-      else tip = st.fz ? 'これ以上上乗せできません。告発してください' : (st.bid ? '個数を増やすか、同じ個数で大きい目にする／多すぎると思ったら「ライアー！」' : '「○の目が全員分でX個以上」をベット。1はワイルド');
+      else tip = st.fz ? 'これ以上上乗せできません。告発してください' : (st.bid ? '個数を増やせば目は自由／同じ個数なら大きい目に／多すぎると思ったら「ライアー！」' : '「○の目が全員分でX個以上」をベット。1はワイルド');
     }
     th.textContent = tip; th.classList.toggle('hidden', !tip);
     $('#cardActs').classList.toggle('hidden', !card);
     $('#diceActs').classList.toggle('hidden', card);
+    acts.classList.toggle('dice', !card);
     if (card) {
       this.world.canSelect = !st.fz;
       const n = this.world.selected.size;
@@ -676,9 +750,14 @@ export const App = {
       $('#bidpanel').classList.toggle('hidden', !!st.fz);
       $('#bidBtn').classList.toggle('hidden', !!st.fz);
       $('#qVal').textContent = this.bidQ;
-      $$('#faces button').forEach(b => b.classList.toggle('on', +b.dataset.f === this.bidF));
+      $$('#faces button').forEach(b => { b.classList.toggle('on', +b.dataset.f === this.bidF); b.classList.toggle('dim', !this.validBid(this.bidQ, +b.dataset.f)); });
+      const bd = st.bid;
+      $('#bidRule').textContent = !bd ? '最初のベットは自由（1個以上・どの目でも）'
+        : (bd.q + 1 <= this.totalDice() ? `${bd.q + 1}個以上なら どの目でもOK` : '') + (bd.f < 6 ? `／${bd.q}個のままなら ${bd.f + 1}〜6の目` : `／${bd.q}個のままは不可`);
       $('#bidBtn').disabled = !this.validBid(this.bidQ, this.bidF);
       $('#bidBtn').innerHTML = `${dieHTML(this.bidF)} ×${this.bidQ} ベット`;
+      const mine = this.myCount(this.bidF);
+      $('#bidPreview').innerHTML = `「${dieHTML(this.bidF)} が <b>${this.bidQ}個</b> 以上」` + (mine != null ? `　手元 ${mine}個` : '');
       $('#dLiarBtn').disabled = !(st.bid && st.bid.s !== this.mySeat);
     }
   },

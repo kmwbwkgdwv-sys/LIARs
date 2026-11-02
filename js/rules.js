@@ -66,14 +66,17 @@ export const RULES_TABS = [
       <div class="example"><div class="ex-row"><span class="say">「${dieHTML(3)} が全部で <b>5個</b> 以上ある」</span></div>
       <p>テーブル全体（全員分）で、その目が最低何個あるかを宣言します。</p></div>
       <h4>③ 次の人は「上乗せ」か「ライアー！」</h4>
-      <p>上乗せは <b>個数を増やす</b> か、<b>同じ個数でより大きい目</b> にします。</p>
+      <p>上乗せは <b>個数を増やす</b> か、<b>同じ個数でより大きい目</b> にします。<br><b>個数を増やすなら、目はどれでもOK</b>です（小さい目に戻してもかまいません）。</p>
       <div class="raise">
         <div><span class="tag">いまのベット</span> 5個 × ${dieHTML(3)}</div>
         <div class="ok">○ 5個 × ${dieHTML(4)}（同じ個数で大きい目）</div>
-        <div class="ok">○ 6個 × ${dieHTML(2)}（個数を増やす）</div>
+        <div class="ok">○ 6個 × ${dieHTML(2)}（個数を増やせば目は自由）</div>
         <div class="ng">× 5個 × ${dieHTML(2)}（小さい目）</div>
         <div class="ng">× 4個 × ${dieHTML(6)}（個数が減っている）</div>
       </div>
+      <div class="example"><div>例：「${dieHTML(6)} が2個」の次は…</div>
+        <div class="ok">○ 3個以上なら ${dieHTML(1)}${dieHTML(2)}${dieHTML(3)}${dieHTML(4)}${dieHTML(5)}${dieHTML(6)} どの目でもOK</div>
+        <div class="ng">× 2個のまま（6より大きい目はないので不可）</div></div>
       <h4>④ 1はワイルド</h4>
       <p>${dieHTML(1)} はどの目としても数えます（${dieHTML(1)} そのものにベットした場合は ${dieHTML(1)} だけ数えます）。</p>
       <div class="example count">
@@ -117,7 +120,7 @@ export const QUICK = {
   ],
   dice: [
     { t: '目的', b: '最後の1人まで生き残る。読み合いに負けると毒を飲み、2本目で死亡します。' },
-    { t: '自分の番', b: '「○の目がテーブル全体でX個以上」とベット。前のベットより個数を増やすか、同じ個数で大きい目に。1はワイルドです。' },
+    { t: '自分の番', b: '「○の目がテーブル全体でX個以上」とベット。個数を増やすなら目はどれでもOK（例：6が2個 → 次は3個以上ならどの目でも）。同じ個数なら大きい目に。1はワイルドです。' },
     { t: '疑うなら', b: '前のベットが多すぎると思ったら「ライアー！」。全員のダイスを公開して数えます。' },
   ],
 };

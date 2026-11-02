@@ -4,7 +4,7 @@ const HAND_SIZE = 5;
 const DICE_PER = 5;
 export const TIMING = {
   deal: 2600, roll: 2800, turn: 30000, forced: 6000,
-  revealCard: 3800, revealDice: 5600,
+  revealCard: 3800, revealDice: 3400, revealDicePer: 2200,
   shotBlank: 9000, shotFatal: 11800,
   drinkSafe: 6600, drinkFatal: 9800,
 };
@@ -249,7 +249,7 @@ export class Engine {
         const loser = lie ? b.s : seat;
         this.loser = loser;
         this.ev({ t: 'dliar', s: seat, tg: b.s, q: b.q, f: b.f, cnt, dice, lie, lo: loser });
-        this.phase = 'reveal'; this.phaseEnd = now + this.T.revealDice; this.botAt = 0;
+        this.phase = 'reveal'; this.phaseEnd = now + this.T.revealDice + dice.filter(Boolean).length * (this.T.revealDicePer || 0); this.botAt = 0;
         this.touch();
         return null;
       }

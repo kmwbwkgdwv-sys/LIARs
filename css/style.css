@@ -141,18 +141,49 @@ h2 { font-family: "Shippori Mincho B1", Georgia, serif; color: var(--gold2); mar
 #bidpanel { flex-direction: row !important; flex-wrap: wrap; justify-content: center; }
 #diceActs .row { margin-top: 6px !important; }
 
-/* action placement: landscape → right column, portrait → above the hand */
+/* 下部レイアウト: --dock-h = 画面下の手札（またはダイス列）の高さ */
+#mystat { bottom: calc(var(--dock-h, 0px) + 10px); }
+#hint { bottom: calc(var(--dock-h, 0px) + 12px); }
+#mydice { right: auto; left: calc(10px + var(--sal)); bottom: calc(10px + var(--sab)); align-items: center; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 6px 8px; gap: 5px; }
+#mydice .ps { font-weight: 800; color: var(--gold2); font-size: 14px; margin-right: 4px; white-space: nowrap; }
 @media (orientation: landscape) {
-  #actions { left: auto; right: calc(12px + var(--sar)); transform: none; width: auto; max-width: 52vw; align-items: flex-end; }
+  #actions { left: auto; right: calc(12px + var(--sar)); transform: none; width: auto; max-width: 52vw; align-items: flex-end; bottom: calc(12px + var(--sab)); }
   #actions .row { justify-content: flex-end; }
   #cardActs { flex-direction: column; align-items: stretch; }
   #diceActs { display: flex; flex-direction: column; align-items: flex-end; }
-  #mydice { right: auto; left: calc(10px + var(--sal)); bottom: calc(58px + var(--sab)); }
+  #mystat { bottom: calc(12px + var(--sab)); }
 }
 @media (orientation: portrait) {
-  #actions { bottom: calc(19vh + var(--sab)); }
-  #mydice { bottom: calc(58px + var(--sab)); right: auto; left: calc(10px + var(--sal)); }
-  #hint { bottom: calc(19vh + var(--sab)); }
+  #actions { left: auto; right: calc(10px + var(--sar)); transform: none; width: auto; max-width: calc(100vw - 20px); align-items: flex-end; bottom: calc(var(--dock-h, 0px) + 10px); }
+  #actions.dice { left: calc(10px + var(--sal)); right: calc(10px + var(--sar)); align-items: center; }
+  #actions .row { justify-content: flex-end; }
+  #actions.dice .row { justify-content: center; }
+  #turnHint { text-align: right; max-width: calc(100vw - 150px); }
+  #actions.dice #turnHint { text-align: center; max-width: 92vw; }
+  #mydice { left: 50%; transform: translateX(-50%); }
+  #mydice .die { font-size: 28px !important; }
+}
+/* ダイスのベット表示 */
+#bidBanner { position: absolute; top: calc(58px + var(--sat)); left: 50%; transform: translateX(-50%); background: rgba(14,9,6,.88); border: 1px solid var(--gold); border-radius: 14px; padding: 7px 14px 8px; text-align: center; pointer-events: none !important; box-shadow: 0 6px 24px rgba(0,0,0,.6); min-width: 210px; max-width: 94vw; }
+#bidBanner .bb-label { font-size: 11px; color: var(--mut); letter-spacing: .08em; }
+#bidBanner .bb-main { display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 22px; font-weight: 800; color: var(--gold2); line-height: 1.2; margin: 2px 0; white-space: nowrap; }
+#bidBanner .bb-main .die { font-size: 38px; }
+#bidBanner .bb-main b { font-size: 30px; color: #fff; }
+#bidBanner .bb-main.none { font-size: 16px; color: var(--txt); }
+#bidBanner .bb-sub { font-size: 12px; color: var(--txt); }
+#bidBanner .bb-mine { white-space: nowrap; margin-top: 4px; font-size: 12px; color: var(--txt); background: rgba(255,255,255,.06); border-radius: 8px; padding: 2px 8px; display: inline-flex; align-items: center; gap: 4px; }
+#bidBanner .bb-mine .die { font-size: 16px; }
+#bidBanner.ok { border-color: #5ad08a; } #bidBanner.ng { border-color: #ff5a5a; }
+#bidBanner .bb-res { font-size: 15px; font-weight: 800; margin-top: 2px; }
+#bidBanner.ok .bb-res { color: #8ef0a8; } #bidBanner.ng .bb-res { color: #ff9a9a; }
+#hud.withBid #feed { top: calc(150px + var(--sat)); }
+#bidPreview { width: 100%; text-align: center; font-size: 13px; color: var(--txt); white-space: nowrap; }
+#bidPreview .die { font-size: 18px; }
+#bidPreview b { color: var(--gold2); font-size: 15px; }
+@media (max-height: 460px) {
+  #bidBanner { top: calc(50px + var(--sat)); padding: 4px 12px 5px; }
+  #bidBanner .bb-main .die { font-size: 30px; } #bidBanner .bb-main b { font-size: 24px; }
+  #hud.withBid #feed { top: calc(126px + var(--sat)); }
 }
 
 /* ---------- rules ---------- */
@@ -204,3 +235,20 @@ ul.ctrl li { margin: 4px 0; }
 .q-step { font-size: 11px; color: var(--mut); letter-spacing: .1em; }
 #turnHint { background: rgba(10,6,4,.78); border: 1px solid var(--line); border-radius: 10px; padding: 5px 10px; font-size: 12.5px; color: var(--txt); max-width: min(92vw, 420px); text-align: center; }
 @media (orientation: landscape) { #turnHint { max-width: 300px; text-align: right; } }
+
+#bidRule { width: 100%; text-align: center; font-size: 12px; color: #8ef0a8; line-height: 1.4; }
+.faces button.dim { opacity: .28; }
+
+#bidBanner .bb-rows { display: flex; flex-direction: column; gap: 3px; margin: 6px 0 4px; }
+#bidBanner .bb-row { display: flex; align-items: center; gap: 6px; padding: 2px 6px; border-radius: 8px; animation: rowin .35s ease-out; }
+#bidBanner .bb-row.cur { background: rgba(243,215,154,.14); box-shadow: inset 0 0 0 1px rgba(243,215,154,.35); }
+#bidBanner .bb-row .nm { width: 72px; text-align: left; font-size: 12px; font-weight: 700; color: var(--gold2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#bidBanner .bb-row .dz { display: inline-flex; gap: 3px; }
+#bidBanner .bb-row .die { font-size: 20px; transition: transform .2s, opacity .2s; }
+#bidBanner .bb-row .die.miss { opacity: .45; }
+#bidBanner .bb-row .die.hit { transform: scale(1.12); }
+#bidBanner .bb-row .cnt { width: 36px; text-align: right; font-weight: 800; color: #fff; }
+#bidBanner .bb-total { font-size: 15px; color: var(--txt); } #bidBanner .bb-total b { font-size: 24px; color: #fff; } #bidBanner .bb-total small { color: var(--mut); }
+#bidBanner .bb-res.wait { color: var(--gold2); animation: pulse .5s infinite alternate; }
+@keyframes rowin { from { opacity: 0; transform: translateY(-4px); } }
+@keyframes pulse { from { opacity: .5; } to { opacity: 1; } }

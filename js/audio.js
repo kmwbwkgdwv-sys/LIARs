@@ -136,6 +136,33 @@ export const Snd = {
     this.noise(o, t, 0.09, 'bandpass', 1800, 2.5, (g) => { g.setValueAtTime(0, t); g.linearRampToValueAtTime(1, t + 0.001); g.exponentialRampToValueAtTime(0.001, t + 0.08); });
     this.tone(o, t, 0.12, 'triangle', 700, 300, 0.25, 0.001);
   },
+  // カップを持ち上げる音
+  cupLift() {
+    if (!this.ok()) return; const t = this.t(); const o = this.out(0.5, 0.2);
+    this.noise(o, t, 0.25, 'bandpass', 900, 1.2, (g, t0, fl) => { g.setValueAtTime(0, t); g.linearRampToValueAtTime(0.5, t + 0.03); g.exponentialRampToValueAtTime(0.001, t + 0.22); fl.frequency.exponentialRampToValueAtTime(2400, t + 0.2); });
+    this.rattle(0.15);
+  },
+  // 該当する目を数えるたびの音（だんだん高く）
+  tick(n = 1) {
+    if (!this.ok()) return; const t = this.t(); const o = this.out(0.35, 0.35);
+    const f = 660 * Math.pow(2, Math.min(n - 1, 18) / 12);
+    this.tone(o, t, 0.35, 'triangle', f, 0, 0.6, 0.002); this.tone(o, t, 0.25, 'sine', f * 2, 0, 0.2, 0.002);
+  },
+  // 該当なし
+  dud() {
+    if (!this.ok()) return; const t = this.t(); const o = this.out(0.35, 0.2);
+    this.tone(o, t, 0.3, 'sine', 180, 120, 0.6, 0.01);
+  },
+  // 発表前のドラムロール
+  drumroll(dur = 0.9) {
+    if (!this.ok()) return; const t = this.t(); const o = this.out(0.6, 0.3);
+    const n = Math.floor(dur / 0.045);
+    for (let i = 0; i < n; i++) {
+      const tt = t + i * 0.045, v = 0.25 + 0.6 * (i / n);
+      this.noise(o, tt, 0.05, 'bandpass', 220, 1.5, (g) => { g.setValueAtTime(0, tt); g.linearRampToValueAtTime(v, tt + 0.003); g.exponentialRampToValueAtTime(0.001, tt + 0.045); });
+    }
+    this.tone(o, t + dur, 0.5, 'sine', 90, 45, 1, 0.004);
+  },
   cock() {
     if (!this.ok()) return; const t = this.t(); const o = this.out(0.6, 0.2);
     [0, 0.09].forEach((d, i) => this.noise(o, t + d, 0.05, 'bandpass', i ? 2600 : 1800, 5, (g) => { g.setValueAtTime(0, t + d); g.linearRampToValueAtTime(1, t + d + 0.001); g.exponentialRampToValueAtTime(0.001, t + d + 0.045); }));
