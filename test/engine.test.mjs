@@ -66,6 +66,19 @@ ok(e.act(t1, { t: 'bid', q: 5, f: 5 }) === 'turn', 'wrong turn rejected');
     e.phase = 'over'; e.toLobby();
   }
   ok(seen.size > 3, 'seating varies between games');
+  // 回転だけの並び（一人称では同じに見える）を含め、前回と同じ並びは出ない
+  for (const n of [2, 3, 4]) {
+    const f = new Engine({ rng: seeded(10 + n), now: () => 0 });
+    for (let i = 0; i < n; i++) f.addPlayer('p' + i, 'p' + i);
+    let prevRel = null;
+    for (let k = 0; k < 200; k++) {
+      f.start();
+      const ids = f.seats.map(x => (x ? x.id : '-')); const a = ids.indexOf('p0');
+      const rel = ids.slice(a).concat(ids.slice(0, a)).join('|');
+      ok(rel !== prevRel, 'relative seating changes every game (' + n + ' players)');
+      prevRel = rel; f.phase = 'over'; f.toLobby();
+    }
+  }
 }
 // あがり: 手札を出し切った後、次の人が告発せずに出したら勝ち
 {
@@ -85,6 +98,16 @@ ok(e.act(t1, { t: 'bid', q: 5, f: 5 }) === 'turn', 'wrong turn rejected');
   b.beginTurn(bx); b.seats[bx].hand = ['Q']; b.table = 'Q';
   b.act(bx, { t: 'play', i: [0] });
   ok(b.act(by, { t: 'liar' }) === null && b.phase === 'reveal' && b.loser === by, 'called liar on true last card → caller loses, no agari');
+}
+// 1回に5枚まで出せる（6枚目以降はない）
+{
+  const e = new Engine({ rng: seeded(21), now: () => 0 });
+  e.addPlayer('x', 'x'); e.addPlayer('y', 'y'); e.start();
+  const x = e.seatOf('x'); e.beginTurn(x);
+  ok(e.act(x, { t: 'play', i: [0, 1, 2, 3, 4] }) === null, 'play 5 cards at once');
+  ok(e.lastPlay.cards.length === 5 && e.seats[x].hand.length === 0, '5 cards on the table');
+  const y = e.seatOf('y');
+  ok(e.act(y, { t: 'play', i: [0, 1, 2, 3, 4, 5] }) === 'count' || e.phase === 'over', 'more than 5 rejected (or agari already)');
 }
 // リボルバー: 6回以内に必ず死亡
 for (let k = 0; k < 50; k++) {

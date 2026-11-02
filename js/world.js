@@ -94,7 +94,7 @@ export class World {
     // particles for mist
     this.particles = [];
     // anim
-    this.tweens = []; this.gen = 0; this.time = 0; this.fire = {};
+    this.tweens = []; this.gen = 0; this.time = 0; this.fireRes = {};
     // camera state
     this.mySeat = -1; this.ghost = false;
     this.look = { yaw: 0, pitch: -0.32 };
@@ -183,7 +183,7 @@ export class World {
   toggleSelect(i) {
     if (!this.canSelect) return;
     if (this.selected.has(i)) this.selected.delete(i);
-    else { if (this.selected.size >= 3) return; this.selected.add(i); }
+    else { if (this.selected.size >= 5) return; this.selected.add(i); }
     Snd.click();
     if (this.onSelect) this.onSelect(this.selected);
   }
@@ -283,7 +283,7 @@ export class World {
     this.setOverlay({ black: 0, red: 0, green: 0, flash: 0, vig: 0.35 });
     Snd.stopHeartbeat();
     this.particles.forEach(p => this.scene.remove(p.pts)); this.particles = [];
-    this.fire = {};
+    this.fireRes = {};
   }
   defaultPitch() { return this.camera.aspect < 0.85 ? -0.14 : -0.3; }
   seatLocal(i, x, y, z) { return this.seats[i].g.localToWorld(new THREE.Vector3(x, y, z)); }
@@ -639,7 +639,8 @@ export class World {
     const toCam = camPos.clone().sub(CENTER); toCam.y = 0; toCam.normalize();
     const right = new THREE.Vector3(0, 1, 0).cross(toCam).normalize();
     const mid = CENTER.clone().addScaledVector(toCam, 0.12); mid.y = 0.97;
-    const targets = take.map((c, k) => mid.clone().addScaledVector(right, (k - (n - 1) / 2) * 0.17));
+    const gapX = n > 3 ? 0.13 : 0.17, big = n > 3 ? 0.65 : 1.0;
+    const targets = take.map((c, k) => mid.clone().addScaledVector(right, (k - (n - 1) / 2) * gapX));
     const look = new THREE.Object3D(); look.position.copy(mid); look.lookAt(camPos.x, camPos.y, camPos.z);
     const endQ = look.quaternion.clone();
     Snd.flip();
@@ -647,7 +648,7 @@ export class World {
       take.forEach((c, k) => {
         c.position.lerpVectors(starts[k], targets[k], e); c.position.y += Math.sin(e * Math.PI) * 0.08;
         c.quaternion.slerpQuaternions(startQ[k], endQ, e);
-        c.scale.setScalar(1 + e * 1.0);
+        c.scale.setScalar(1 + e * big);
       });
     });
     this.revealCards = take;
@@ -685,11 +686,12 @@ export class World {
     const toCam = camPos.clone().sub(CENTER); toCam.y = 0; toCam.normalize();
     const right = new THREE.Vector3(0, 1, 0).cross(toCam).normalize();
     const mid = CENTER.clone().addScaledVector(toCam, 0.12); mid.y = 0.97;
-    const targets = take.map((c, k) => mid.clone().addScaledVector(right, (k - (n - 1) / 2) * 0.17));
+    const gapX = n > 3 ? 0.13 : 0.17, big = n > 3 ? 0.65 : 1.0;
+    const targets = take.map((c, k) => mid.clone().addScaledVector(right, (k - (n - 1) / 2) * gapX));
     const look = new THREE.Object3D(); look.position.copy(mid); look.lookAt(camPos.x, camPos.y, camPos.z);
     Snd.flip();
     await this.tween(0.75, e => {
-      take.forEach((c, k) => { c.position.lerpVectors(starts[k], targets[k], e); c.position.y += Math.sin(e * Math.PI) * 0.08; c.quaternion.slerpQuaternions(startQ[k], look.quaternion, e); c.scale.setScalar(1 + e); });
+      take.forEach((c, k) => { c.position.lerpVectors(starts[k], targets[k], e); c.position.y += Math.sin(e * Math.PI) * 0.08; c.quaternion.slerpQuaternions(startQ[k], look.quaternion, e); c.scale.setScalar(1 + e * big); });
     });
     this.revealCards = take; this.pileBusy = false;
     if (!this.alive(g)) return;
@@ -751,17 +753,25 @@ export class World {
     return m;
   }
 
-  // 引き金の結果（ホストが引き金の瞬間に送る）を待つ。届くまで震え続ける
+  // 引き金の結果（ホストが引き金の瞬間に送る）を待つ。届くまで震え続ける。
+  // 結果のイベントを取りこぼしても、状態（生死・ラウンドの進行）から判断して必ず先へ進む。
   waitFire(seat, n) {
-    const f = this.fire[seat];
-    if (f && f.n === n && f.fatal !== undefined) { delete this.fire[seat]; return Promise.resolve(f.fatal); }
-    return new Promise(res => { this.fire[seat] = { n, res }; });
+    const key = seat + ':' + n;
+    return new Promise(res => {
+      const t0 = performance.now();
+      const chk = () => {
+        if (this.fireRes[key] !== undefined) { const v = this.fireRes[key]; delete this.fireRes[key]; return res(v); }
+        const st = this.st, p = st && st.pl[seat];
+        if (p && !p.a) return res(true);
+        const waited = performance.now() - t0;
+        if (st && st.ph !== 'shot' && waited > 1200) return res(false);
+        if (waited > 15000) return res(false);
+        setTimeout(chk, 120);
+      };
+      chk();
+    });
   }
-  evFire(ev) {
-    const f = this.fire[ev.s];
-    if (f && f.n === ev.n && f.res) { delete this.fire[ev.s]; f.res(ev.fatal); }
-    else this.fire[ev.s] = { n: ev.n, fatal: ev.fatal };
-  }
+  evFire(ev) { this.fireRes[ev.s + ':' + ev.n] = !!ev.fatal; }
   async evShot(ev) {
     const g = this.gen;
     const s = this.seats[ev.s];

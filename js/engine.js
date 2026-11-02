@@ -1,5 +1,6 @@
 // ルールエンジン（ホストが状態を管理する。DOM非依存なのでNodeでもテスト可能）
 export const CARD_TYPES = ['A', 'K', 'Q'];
+export const MAX_PLAY = 5;   // 1回に出せる最大枚数
 const HAND_SIZE = 5;
 const DICE_PER = 5;
 export const TIMING = {
@@ -120,11 +121,23 @@ export class Engine {
 
   start() {
     if (this.phase !== 'lobby' || this.occupied().length < 2) return false;
-    // 席替え: ゲームごとに座る位置（＝順番と隣の人）をランダムにする
+    // 席替え: ゲームごとに座る位置（＝順番と隣の人）をランダムにする。
+    // 全員が1つずつずれただけ（回転）だと一人称では同じ並びに見えるので、前回と「並び順」が必ず変わるようにする
     const players = this.seats.filter(Boolean);
-    const spots = shuffleArr([0, 1, 2, 3], this.rng);
-    this.seats = [null, null, null, null];
-    players.forEach((p, k) => { this.seats[spots[k]] = p; });
+    const sig = (seats) => {
+      const ids = seats.map(x => (x ? x.id : '-'));
+      const anchor = players.map(p => p.id).sort()[0];
+      const k = ids.indexOf(anchor);
+      return ids.slice(k).concat(ids.slice(0, k)).join('|');
+    };
+    const prev = sig(this.seats);
+    let next, tries = 0;
+    do {
+      const spots = shuffleArr([0, 1, 2, 3], this.rng);
+      next = [null, null, null, null];
+      players.forEach((p, k) => { next[spots[k]] = p; });
+    } while (players.length > 1 && sig(next) === prev && ++tries < 60);
+    this.seats = next;
     for (const s of this.seats) {
       if (!s) continue;
       Object.assign(s, { alive: true, left: false, shots: 0, poison: 0, hand: [], dice: [] });
@@ -222,7 +235,7 @@ export class Engine {
       if (this.forced) return 'forced';
       if (!Array.isArray(a.i)) return 'bad';
       const idx = [...new Set(a.i)].filter(n => Number.isInteger(n));
-      if (idx.length < 1 || idx.length > 3) return 'count';
+      if (idx.length < 1 || idx.length > MAX_PLAY) return 'count';
       if (idx.some(n => n < 0 || n >= s.hand.length)) return 'idx';
       // あがり: 直前の人が手札を出し切り、この人が告発せずにカードを出した → 直前の人の勝ち
       const lp = this.lastPlay;
@@ -438,12 +451,12 @@ export const Bots = {
     let pick;
     if (good.length && (bad.length === 0 || r() < 0.78)) {
       shuffleArr(good, r);
-      const n = Math.min(good.length, 1 + Math.floor(r() * Math.min(3, good.length)));
+      const n = Math.min(good.length, 1 + Math.floor(r() * Math.min(MAX_PLAY, good.length)));
       pick = good.slice(0, n);
-      if (pick.length < 3 && bad.length && r() < 0.14) pick.push(bad[Math.floor(r() * bad.length)]);
+      if (pick.length < MAX_PLAY && bad.length && r() < 0.14) pick.push(bad[Math.floor(r() * bad.length)]);
     } else {
       const pool = shuffleArr(bad.length ? bad.slice() : good.slice(), r);
-      pick = pool.slice(0, Math.min(pool.length, r() < 0.3 ? 2 : 1));
+      pick = pool.slice(0, Math.min(pool.length, r() < 0.1 ? 3 : r() < 0.3 ? 2 : 1));
     }
     return { t: 'play', i: pick };
   },

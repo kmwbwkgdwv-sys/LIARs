@@ -39,7 +39,7 @@ export const App = {
     setInterval(() => { try { this.logic(); } catch (e) { console.error(e); } }, 80);
     let last = performance.now();
     const loop = (t) => {
-      const dt = Math.max(0, Math.min(0.1, (t - last) / 1000)); last = Math.max(last, t);
+      const dt = Math.max(0, Math.min(0.25, (t - last) / 1000)); last = Math.max(last, t);
       this.fps = this.fps ? this.fps * 0.95 + (1 / Math.max(dt, 0.001)) * 0.05 : 30;
       try { this.tick(dt); this.autoQuality(dt); } catch (e) { console.error(e); }
       requestAnimationFrame(loop);
@@ -194,7 +194,7 @@ export const App = {
     // actions
     $('#playBtn').onclick = () => {
       const sel = [...this.world.selected].sort((a, b) => a - b);
-      if (sel.length < 1 || sel.length > 3) return;
+      if (sel.length < 1 || sel.length > 5) return;
       this.world.lastPlayed = sel;
       this.act({ t: 'play', i: sel });
     };
@@ -745,7 +745,7 @@ export const App = {
         const prevOut = st.lp && st.lp.s !== this.mySeat && st.pl[st.lp.s] && st.pl[st.lp.s].hc === 0;
         tip = st.fz ? '全員の手札が尽きました。最後のカードを告発します'
           : prevOut ? `⚠ ${st.pl[st.lp.s].n} は手札を出し切った！ 出すと相手の「あがり」。疑うなら「ライアー！」`
-          : (st.lp && st.lp.s !== this.mySeat ? `${CARD_LABEL[st.tc]}を1〜3枚選んで出す（嘘でもOK）／疑うなら「ライアー！」` : `${CARD_LABEL[st.tc]}を1〜3枚選んで出す（嘘でもOK）`);
+          : (st.lp && st.lp.s !== this.mySeat ? `${CARD_LABEL[st.tc]}を1〜5枚選んで出す（嘘でもOK）／疑うなら「ライアー！」` : `${CARD_LABEL[st.tc]}を1〜5枚選んで出す（嘘でもOK）`);
       }
       else tip = st.fz ? 'これ以上上乗せできません。告発してください' : (st.bid ? '個数を増やせば目は自由／同じ個数なら大きい目に／多すぎると思ったら「ライアー！」' : '「○の目が全員分でX個以上」をベット。1はワイルド');
     }
@@ -758,7 +758,7 @@ export const App = {
       const n = this.world.selected.size;
       const pb = $('#playBtn');
       pb.classList.toggle('hidden', !!st.fz);
-      pb.disabled = n < 1 || n > 3;
+      pb.disabled = n < 1 || n > 5;
       pb.textContent = n ? `${CARD_LABEL[st.tc]}を${n}枚 出す` : 'カードを選択';
       $('#liarBtn').disabled = !(st.lp && st.lp.s !== this.mySeat);
     } else {
