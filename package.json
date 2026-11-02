@@ -1,0 +1,13 @@
+{
+  "name": "liars-table",
+  "version": "1.0.0",
+  "description": "ブラウザで遊べる3D一人称の心理戦デスゲーム（カード＝リボルバー／ダイス＝毒薬）",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "node test/engine.test.mjs",
+    "build:single": "node tools/build-single.mjs",
+    "start": "npx --yes serve ."
+  },
+  "license": "MIT"
+}

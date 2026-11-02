@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Liar's Table — 嘘つきたちの卓</title>
+<meta name="description" content="ブラウザで遊べる3D一人称の心理戦デスゲーム。カード（リボルバー）とダイス（毒薬）の2モード。">
+<meta name="theme-color" content="#0b0806">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Shippori+Mincho+B1:wght@700;800&display=swap">
+<link rel="stylesheet" href="css/style.css">
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }</script>
+<script src="js/config.js"></script>
+</head>
+<body>
+<div id="app">
+  <canvas id="c"></canvas>
+  <div id="labels"></div>
+  <div id="fx-vig" class="fx"></div>
+  <div id="fx-green" class="fx"></div>
+  <div id="fx-red" class="fx"></div>
+  <div id="fx-flash" class="fx"></div>
+  <div id="fx-black" class="fx"></div>
+  <div id="bigtext"></div>
+
+  <div id="hud" class="hidden">
+    <div id="topbar">
+      <div id="tableinfo" class="chip"></div>
+      <div id="turninfo" class="chip"><span id="turntext"></span><div id="timer"><i></i></div></div>
+      <button id="helpBtn" class="iconBtn" aria-label="ルール">?</button>
+      <button id="menuBtn" class="iconBtn" aria-label="メニュー">≡</button>
+    </div>
+    <div id="feed"></div>
+    <div id="mystat" class="chip hidden"></div>
+    <div id="mydice" class="hidden"></div>
+    <div id="hint" class="hidden"></div>
+    <div id="actions" class="hidden">
+      <div id="turnHint" class="hidden"></div>
+      <div id="cardActs" class="row">
+        <button id="playBtn" class="btn">出す</button>
+        <button id="liarBtn" class="btn liar">ライアー！</button>
+      </div>
+      <div id="diceActs" class="hidden">
+        <div id="bidpanel">
+          <div class="stepper"><button id="qMinus">−</button><div class="val"><span id="qVal">1</span>個</div><button id="qPlus">＋</button></div>
+          <div class="faces" id="faces"></div>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <button id="bidBtn" class="btn">ベット</button>
+          <button id="dLiarBtn" class="btn liar">ライアー！</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="menu" class="hidden">
+    <button id="mSound">🔊 サウンド: ON</button>
+    <button id="mQuality">🖥 画質: 自動</button>
+    <button id="mHints">💡 ヒント: ON</button>
+    <button id="mRules">📜 ルール</button>
+    <button id="mLeave">🚪 退出する</button>
+  </div>
+
+  <div id="title" class="screen">
+    <div class="card">
+      <div class="logo"><h1>LIAR'S <span>TABLE</span></h1><p>嘘 つ き た ち の 卓</p></div>
+      <div class="field"><label>プレイヤー名</label><input id="nameIn" maxlength="12" placeholder="名前を入力" autocomplete="off"></div>
+      <div class="stack">
+        <button class="btn" id="goCreate">ロビーを作成</button>
+        <button class="btn" id="goJoin">ロビーに参加</button>
+        <button class="btn ghost" id="goSolo">CPUと練習（オフライン）</button>
+        <button class="btn ghost small" id="goRules">ルールを見る</button>
+      </div>
+      <div id="netstat">オンライン接続を確認中…</div>
+    </div>
+  </div>
+
+  <div id="createScr" class="screen hidden">
+    <div class="card">
+      <h2>ロビーを作成</h2>
+      <div class="field"><label>ロビーID</label><input id="cId" maxlength="16" autocomplete="off" autocapitalize="characters"></div>
+      <div class="field"><label>パスワード</label><input id="cPw" maxlength="32" autocomplete="off" placeholder="参加者に伝える合言葉"></div>
+      <div class="field"><label>モード</label><div class="seg" id="cMode"><button data-m="card" class="on">カード（リボルバー）</button><button data-m="dice">ダイス（毒薬）</button></div></div>
+      <div class="stack"><button class="btn" id="doCreate">作成する</button><button class="btn ghost small back">戻る</button></div>
+      <div class="note err" id="cErr"></div>
+    </div>
+  </div>
+
+  <div id="joinScr" class="screen hidden">
+    <div class="card">
+      <h2>ロビーに参加</h2>
+      <div class="field"><label>ロビーID</label><input id="jId" maxlength="16" autocomplete="off" autocapitalize="characters"></div>
+      <div class="field"><label>パスワード</label><input id="jPw" maxlength="32" autocomplete="off"></div>
+      <div class="stack"><button class="btn" id="doJoin">参加する</button><button class="btn ghost small back">戻る</button></div>
+      <div class="note err" id="jErr"></div>
+    </div>
+  </div>
+
+  <div id="lobbyScr" class="panel hidden">
+    <h2 id="lobbyTitle">ロビー</h2>
+    <div class="lobbyid" id="lobbyIdBox"><div><div style="font-size:11px;color:var(--mut)">ロビーID</div><b id="lobbyId"></b></div><button class="btn small ghost" id="copyId">コピー</button></div>
+    <div class="field" style="margin:6px 0"><label>モード</label><div class="seg" id="lMode"><button data-m="card">カード（リボルバー）</button><button data-m="dice">ダイス（毒薬）</button></div></div>
+    <ul class="seats" id="seatList"></ul>
+    <div id="hostCtl" class="stack" style="margin-top:6px">
+      <div class="row2"><button class="btn small ghost" id="addBot">＋ CPUを追加</button><button class="btn small ghost" id="rmBot">− CPUを外す</button></div>
+      <button class="btn" id="startBtn">ゲーム開始</button>
+    </div>
+    <div class="note" id="lobbyNote"></div>
+    <div class="row2" style="margin-top:8px"><button class="btn ghost small" id="lobbyQuick">かんたん説明</button><button class="btn ghost small" id="lobbyRules">📜 ルール</button></div>
+    <div class="stack" style="margin-top:8px"><button class="btn ghost small" id="leaveBtn">退出</button></div>
+  </div>
+
+  <div id="overScr" class="panel hidden">
+    <h2 id="overTitle"></h2>
+    <div class="sub" id="overSub"></div>
+    <div class="stack">
+      <button class="btn" id="againBtn">ロビーに戻る</button>
+      <button class="btn ghost small" id="overLeave">退出</button>
+    </div>
+    <div class="note" id="overNote"></div>
+  </div>
+
+  <div id="rulesScr" class="screen hidden">
+    <div class="card rules">
+      <div class="rules-head"><h2>ルール説明</h2><button class="iconBtn" id="rulesClose" aria-label="閉じる">✕</button></div>
+      <div class="tabs" id="rulesTabs"></div>
+      <div id="rulesBody"></div>
+    </div>
+  </div>
+
+  <div id="quick" class="hidden">
+    <div class="q-step" id="quickStep"></div>
+    <h3 id="quickTitle"></h3>
+    <p id="quickBody"></p>
+    <div class="row2"><button class="btn ghost small" id="quickSkip">スキップ</button><button class="btn ghost small" id="quickRules">詳しいルール</button><button class="btn small" id="quickNext">次へ</button></div>
+  </div>
+
+  <div id="toast"></div>
+</div>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
