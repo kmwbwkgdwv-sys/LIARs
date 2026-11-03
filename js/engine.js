@@ -10,6 +10,11 @@ export const TIMING = {
   drinkSafe: 6600, drinkFatal: 9800,
 };
 
+// 隠しコマンド: プレイヤー名が「nekojita」の人だけ特殊能力が使える（全角・大文字も可）
+export function isNeko(name) {
+  return String(name || '').normalize('NFKC').trim().toLowerCase() === 'nekojita';
+}
+
 export function makeDeck() {
   const d = [];
   for (const t of CARD_TYPES) for (let i = 0; i < 6; i++) d.push(t);
@@ -43,6 +48,7 @@ export class Engine {
     this.table = null;
     this.pile = 0;
     this.lastPlay = null;
+    this.plays = [];   // このラウンドに出されたカードの記録（nekojita のチート表示用）
     this.bid = null;
     this.winner = -1;
     this.loser = -1;
@@ -152,7 +158,7 @@ export class Engine {
 
   newRound(starter) {
     this.rn++;
-    this.lastPlay = null; this.bid = null; this.pile = 0; this.forced = false; this.loser = -1;
+    this.lastPlay = null; this.plays = []; this.bid = null; this.pile = 0; this.forced = false; this.loser = -1;
     const now = this.now();
     if (this.mode === 'card') {
       this.table = CARD_TYPES[Math.floor(this.rng() * 3)];
@@ -252,6 +258,7 @@ export class Engine {
       const cards = idx.map(n => s.hand[n]);
       s.hand = s.hand.filter((_, n) => !idx.includes(n));
       this.lastPlay = { seat, cards };
+      this.plays.push({ s: seat, c: cards.slice() });
       this.pile += cards.length;
       this.ev({ t: 'play', s: seat, n: cards.length, tc: this.table, left: s.hand.length });
       this.passTurnCard(seat);
@@ -274,7 +281,7 @@ export class Engine {
         if (!b || b.s === seat) return 'nobid';
         let cnt = 0;
         const dice = this.seats.map(p => (p && p.alive ? p.dice.slice() : null));
-        for (const d of dice) if (d) for (const v of d) if (v === b.f || (b.f !== 1 && v === 1)) cnt++;
+        for (const d of dice) if (d) for (const v of d) if (v === b.f) cnt++;   // 宣言した目だけを数える（1はワイルドではない）
         const lie = cnt < b.q;
         const loser = lie ? b.s : seat;
         this.loser = loser;
@@ -312,8 +319,8 @@ export class Engine {
       if (!b) {
         const counts = [0, 0, 0, 0, 0, 0, 0];
         for (const v of s.dice) counts[v]++;
-        f = 2; for (let k = 2; k <= 6; k++) if (counts[k] + counts[1] > counts[f] + counts[1]) f = k;
-        q = Math.max(1, counts[f] + counts[1]);
+        f = 1; for (let k = 2; k <= 6; k++) if (counts[k] >= counts[f]) f = k;
+        q = Math.max(1, counts[f]);
       } else if (b.f < 6) { q = b.q; f = b.f + 1; } else { q = b.q + 1; f = 2; }
       if (!this.validBid(q, f)) { if (b) this.act(seat, { t: 'liar' }); return; }
       this.act(seat, { t: 'bid', q, f });
@@ -362,7 +369,7 @@ export class Engine {
       if (s && s.left) this.seats[i] = null;
       else if (s) Object.assign(s, { alive: true, hand: [], dice: [], shots: 0, poison: 0 });
     }
-    this.phase = 'lobby'; this.turn = -1; this.lastPlay = null; this.bid = null; this.pile = 0; this.winner = -1;
+    this.phase = 'lobby'; this.turn = -1; this.lastPlay = null; this.plays = []; this.bid = null; this.pile = 0; this.winner = -1;
     this.ev({ t: 'lobby' });
   }
 
@@ -421,7 +428,14 @@ export class Engine {
   privateFor(seat) {
     const s = this.seats[seat];
     if (!s) return null;
-    return this.mode === 'card' ? { r: this.rn, h: s.hand.slice() } : { r: this.rn, d: s.dice.slice() };
+    const out = this.mode === 'card' ? { r: this.rn, h: s.hand.slice() } : { r: this.rn, d: s.dice.slice() };
+    // nekojita だけに追加情報（その人の暗号化された個人データにだけ入るので、他の人には届かない）
+    if (isNeko(s.name) && !s.bot) {
+      out.x = this.mode === 'card'
+        ? { pl: this.plays.map(p => ({ s: p.s, c: p.c.slice() })) }
+        : { dd: this.seats.map(p => (p && p.alive && p.dice.length ? p.dice.slice() : null)) };
+    }
+    return out;
   }
 }
 
@@ -465,8 +479,8 @@ export const Bots = {
     if (eng.forced) return { t: 'liar' };
     const total = eng.totalDice();
     const others = total - s.dice.length;
-    const mine = f => s.dice.filter(v => v === f || (f !== 1 && v === 1)).length;
-    const exp = f => mine(f) + others * (f === 1 ? 1 / 6 : 1 / 3);
+    const mine = f => s.dice.filter(v => v === f).length;
+    const exp = f => mine(f) + others / 6;
     const b = eng.bid;
     if (b && b.s !== seat) {
       const diff = b.q - exp(b.f);
@@ -479,7 +493,7 @@ export const Bots = {
       if (!b) q = Math.max(1, Math.floor(exp(f) - 0.4 - r() * 1.2));
       else q = f > b.f ? b.q : b.q + 1;
       if (q > total) continue;
-      const score = exp(f) - q + (r() - 0.5) * 0.9 - (f === 1 ? 0.4 : 0);
+      const score = exp(f) - q + (r() - 0.5) * 0.9;
       if (!best || score > best.score) best = { q, f, score };
     }
     if (!best) return { t: 'liar' };

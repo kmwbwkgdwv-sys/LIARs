@@ -252,3 +252,48 @@ ul.ctrl li { margin: 4px 0; }
 #bidBanner .bb-res.wait { color: var(--gold2); animation: pulse .5s infinite alternate; }
 @keyframes rowin { from { opacity: 0; transform: translateY(-4px); } }
 @keyframes pulse { from { opacity: .5; } to { opacity: 1; } }
+
+/* ---------- 隠しコマンド nekojita ---------- */
+#neckUI { position: absolute; left: calc(10px + var(--sal)); bottom: calc(var(--dock-h, 0px) + 56px); width: 122px; padding: 7px 9px 6px; background: rgba(18,11,8,.74); border: 1px solid var(--line); border-radius: 12px; backdrop-filter: blur(3px); touch-action: none; z-index: 4; }
+.ngHead { font-size: 11.5px; font-weight: 800; color: var(--gold2); margin-bottom: 6px; letter-spacing: .04em; white-space: nowrap; }
+.ngRow { display: flex; gap: 10px; align-items: stretch; }
+.gauge { position: relative; touch-action: none; cursor: pointer; }
+.gauge.v { width: 34px; height: 128px; border-radius: 17px; background: #1c120a; border: 1px solid var(--line); overflow: hidden; flex: none; }
+.gauge.v .fill { position: absolute; left: 0; right: 0; bottom: 0; height: calc(12px + var(--v, 0) * (100% - 24px)); background: linear-gradient(#f3d79a, #a8773a); opacity: .8; }
+.gauge.v .knob { position: absolute; left: 50%; bottom: calc(12px + var(--v, 0) * (100% - 24px)); width: 28px; height: 14px; transform: translate(-50%, 50%); border-radius: 7px; background: #fff3d6; box-shadow: 0 1px 4px rgba(0,0,0,.7); }
+.ngSide { display: flex; flex-direction: column; justify-content: flex-end; align-items: flex-start; gap: 1px; }
+.ngSide small { font-size: 10px; color: var(--mut); }
+.ngSide b { font-size: 26px; color: var(--gold2); line-height: 1; font-family: ui-monospace, Menlo, monospace; }
+.ngBtn { margin-top: 10px; font-size: 11px; padding: 5px 9px; border: 1px solid var(--line); border-radius: 8px; color: var(--gold2); background: #2a1a0e; }
+.gauge.h { margin-top: 9px; height: 30px; border-radius: 15px; background: #1c120a; border: 1px solid var(--line); }
+.gauge.h .mid { position: absolute; left: 50%; top: 6px; bottom: 6px; width: 2px; margin-left: -1px; background: var(--line); }
+.gauge.h .knob { position: absolute; top: 50%; left: calc(12px + var(--v, .5) * (100% - 24px)); width: 18px; height: 22px; transform: translate(-50%, -50%); border-radius: 6px; background: #fff3d6; box-shadow: 0 1px 4px rgba(0,0,0,.7); }
+.ngLab { display: flex; justify-content: space-between; font-size: 9.5px; color: var(--mut); margin-top: 3px; white-space: nowrap; }
+@media (max-height: 560px) { .gauge.v { height: 84px; } #neckUI { bottom: calc(var(--dock-h, 0px) + 50px); } }
+#cheatPile { position: absolute; left: 0; top: 0; background: rgba(12,6,18,.8); border: 1px solid #a77bf0; border-radius: 10px; padding: 5px 8px 6px; pointer-events: none !important; z-index: 3; max-width: min(80vw, 300px); box-shadow: 0 0 16px rgba(160,100,255,.35); }
+#cheatPile .ch { font-size: 10.5px; color: #d6b8ff; font-weight: 800; white-space: nowrap; }
+#cheatPile .cr { display: flex; align-items: center; gap: 6px; margin-top: 4px; opacity: .7; }
+#cheatPile .cr.last { opacity: 1; }
+#cheatPile .cn { font-size: 11px; color: var(--txt); white-space: nowrap; max-width: 96px; overflow: hidden; text-overflow: ellipsis; }
+#cheatPile .cr.last .cn { color: var(--gold2); font-weight: 800; }
+#cheatPile .cc { display: flex; gap: 3px; }
+#cheatPile .mini-card { width: 21px; height: 30px; border-radius: 4px; }
+#cheatPile .mini-card b { font-size: 13px; }
+#cheatPile .mini-card small { display: none; }
+#cheatPile .cr.last .mini-card { width: 27px; height: 38px; }
+#cheatPile .cr.last .mini-card b { font-size: 16px; }
+#cheatPile .mini-card.joker { color: #6a2a9a; }
+#cheatPile .mini-card.lie { box-shadow: 0 0 0 2px var(--red2), 0 2px 4px rgba(0,0,0,.5); }
+#cheatPile .none { font-size: 11px; color: var(--mut); opacity: 1; }
+.plabel .pd { display: none; gap: 2px; justify-content: center; margin-top: 3px; padding: 2px 3px; border-radius: 6px; background: rgba(120,70,200,.25); outline: 1px solid rgba(167,123,240,.6); }
+.plabel .pd .die { font-size: 14px; }
+.cheatBox { margin-top: 14px; display: flex; flex-direction: column; gap: 6px; }
+.ckRow { display: flex; align-items: center; gap: 10px; }
+.ckRow > span { font-size: 13px; color: var(--mut); min-width: 64px; }
+.ckSeg { width: 132px; }
+.ckSeg button { padding: 5px 0; font-size: 12.5px; }
+#bidBanner .bb-cheat { margin-top: 5px; font-size: 12.5px; font-weight: 800; padding: 3px 8px; border-radius: 8px; border: 1px solid #a77bf0; background: rgba(120,70,200,.18); }
+#bidBanner .bb-cheat .die { font-size: 15px; margin: 0 2px; }
+#bidBanner .bb-cheat.ok { color: #8dffb0; } #bidBanner .bb-cheat.ng { color: #ff8a8a; }
+.cheatTag { display: inline-block; margin-left: 6px; font-size: 12px; font-weight: 800; padding: 1px 7px; border-radius: 7px; border: 1px solid #a77bf0; background: rgba(120,70,200,.2); vertical-align: middle; }
+.cheatTag.ok { color: #8dffb0; } .cheatTag.ng { color: #ff8a8a; }

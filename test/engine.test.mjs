@@ -1,5 +1,5 @@
 // エンジンの自動テスト: node test/engine.test.mjs （または npm test）
-import { Engine } from '../js/engine.js';
+import { Engine, isNeko } from '../js/engine.js';
 
 function seeded(seed) { let s = seed >>> 0; return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; }
 let fail = 0;
@@ -36,7 +36,7 @@ for (let g = 0; g < 300; g++) {
       if (ev.t === 'liar' && ev.fz) stats.card.forced++;
       if (ev.t === 'agari') stats.card.agari++;
       if (ev.t === 'dliar') {
-        let c = 0; for (const d of ev.dice) if (d) for (const v of d) if (v === ev.f || (ev.f !== 1 && v === 1)) c++;
+        let c = 0; for (const d of ev.dice) if (d) for (const v of d) if (v === ev.f) c++;
         ok(c === ev.cnt, 'dice count');
       }
     }
@@ -116,6 +116,39 @@ for (let k = 0; k < 50; k++) {
   const si = r.seatOf('a'), s = r.seats[si]; let shots = 0;
   while (s.alive && shots < 7) { r.loser = si; r.phase = 'reveal'; r.penalty(); ok(r.events.slice(-1)[0].fatal === undefined, 'shot event hides result'); r.phaseEnd = 0; r.update(); shots++; r.phase = 'turn'; }
   ok(!s.alive && shots <= 6, 'revolver kills within 6 pulls');
+}
+// ダイス: 1はワイルドではない（宣言した目だけを数える）
+{
+  const mk = (bid, dice) => { const e = new Engine({ rng: seeded(3), now: () => 0 }); e.setMode('dice'); e.addPlayer('a', 'a'); e.addPlayer('b', 'b'); e.start();
+    const a = e.seatOf('a'), b = e.seatOf('b'); e.seats[a].dice = dice[0]; e.seats[b].dice = dice[1]; e.bid = { q: bid.q, f: bid.f, s: a }; e.beginTurn(b); e.act(b, { t: 'liar' }); return e.events.slice(-1)[0]; };
+  let ev = mk({ q: 5, f: 2 }, [[2, 2, 1, 1, 3], [2, 1, 1, 4, 5]]);
+  ok(ev.cnt === 3 && ev.lie, '2×5: only 2s counted (3) → lie');
+  ev = mk({ q: 4, f: 6 }, [[6, 6, 1, 1, 3], [6, 6, 1, 4, 5]]);
+  ok(ev.cnt === 4 && !ev.lie, '6×4: only 6s counted (4) → true');
+  ev = mk({ q: 4, f: 6 }, [[6, 1, 1, 1, 3], [6, 6, 1, 4, 5]]);
+  ok(ev.cnt === 3 && ev.lie, '6×4 with many 1s: still 3 → lie');
+  ev = mk({ q: 3, f: 1 }, [[1, 1, 2, 2, 3], [1, 4, 4, 5, 6]]);
+  ok(ev.cnt === 3 && !ev.lie, '1×3: 1s counted as their own face');
+}
+// 隠しコマンド nekojita: その人の個人データにだけ追加情報が入る
+{
+  ok(isNeko('nekojita') && isNeko(' NekoJita ') && isNeko('ｎｅｋｏｊｉｔａ') && !isNeko('nekojita2') && !isNeko('neko'), 'isNeko name check');
+  const e = new Engine({ rng: seeded(5), now: () => 0 });
+  e.addPlayer('n', 'nekojita'); e.addPlayer('o', 'other'); e.addBot(['CPU']); e.start();
+  const n = e.seatOf('n'), o = e.seatOf('o');
+  ok(e.privateFor(n).x && Array.isArray(e.privateFor(n).x.pl) && e.privateFor(n).x.pl.length === 0, 'neko gets empty play log');
+  ok(!e.privateFor(o).x, 'others get no cheat data');
+  const first = e.turn; e.beginTurn(first);
+  const cards = e.seats[first].hand.slice(0, 2);
+  e.act(first, { t: 'play', i: [0, 1] });
+  const x = e.privateFor(n).x;
+  ok(x.pl.length === 1 && x.pl[0].s === first && x.pl[0].c.join() === cards.join(), 'neko sees played cards');
+  ok(!JSON.stringify(e.publicState()).includes('"pl":[{"s"'), 'public state has no play log');
+  const d = new Engine({ rng: seeded(6), now: () => 0 }); d.setMode('dice');
+  d.addPlayer('n', 'nekojita'); d.addPlayer('o', 'other'); d.addBot(['CPU']); d.start();
+  const dx = d.privateFor(d.seatOf('n')).x;
+  ok(dx && dx.dd.filter(Boolean).length === 3 && dx.dd.every(v => !v || v.length === 5), 'neko sees all dice');
+  ok(!d.privateFor(d.seatOf('o')).x, 'other player gets no dice of others');
 }
 console.log(JSON.stringify(stats));
 if (fail) { console.error(fail + ' failures'); process.exit(1); }

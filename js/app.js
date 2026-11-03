@@ -1,6 +1,6 @@
 // アプリ本体: 画面遷移、ロビー、通信、HUD
-import { $, $$, esc, clamp, randId, lsGet, lsSet, cleanName, dieHTML, CARD_LABEL, CARD_JP, BOT_NAMES } from './util.js';
-import { Engine } from './engine.js';
+import { $, $$, esc, clamp, randId, lsGet, lsSet, cleanName, dieHTML, cardHTML, CARD_LABEL, CARD_JP, BOT_NAMES } from './util.js';
+import { Engine, isNeko } from './engine.js';
 import { Sec } from './crypto.js';
 import { getRoomCapability, RoomNet } from './net-room.js';
 import { loadPeerJS, PeerNet, p2pSupported } from './net-peer.js';
@@ -11,6 +11,7 @@ import { RULES_TABS, QUICK } from './rules.js';
 export const App = {
   role: null, net: null, room: null, engine: null, world: null,
   myId: 'local', mySeat: -1, st: null, priv: null, lastEv: null, stRecv: 0,
+  neck: { len: 0, dir: 0 }, neckOK: false, cheat: false, neckShow: false,   // 隠しコマンド nekojita
   hostPeer: null, hostPk: null, lastPvStr: '', actSeq: 0, processed: {}, missing: {},
   pubVer: 0, lastPub: 0, sealCache: {}, lobbyId: '', mode: 'card',
   bidQ: 1, bidF: 2, lastHd: '', hdT: 0, bubbles: {}, botLook: {}, hostMissingSince: 0,
@@ -114,9 +115,76 @@ export const App = {
   },
   openRules(tab, back) {
     this.rulesBack = back;
+    this.renderCheatBox();
     if (tab) this.rulesTab(tab);
     $('#rulesScr').classList.remove('hidden');
     if (back === 'title') $('#title').classList.add('hidden');
+  },
+  // ---- 隠しコマンド nekojita ----
+  isNekoMe() {
+    const me = this.st && this.mySeat >= 0 ? this.st.pl[this.mySeat] : null;
+    return isNeko(me ? me.n : (cleanName($('#nameIn').value) || this.name));
+  },
+  // 「？」→「操作」タブのいちばん下に、nekojita だけ ON/OFF を出す（首のばしの表示／チート）
+  renderCheatBox() {
+    const sec = document.querySelector('#rulesBody section[data-tab="ctrl"]');
+    if (!sec) return;
+    let box = sec.querySelector('.cheatBox');
+    if (!box) { box = document.createElement('div'); box.className = 'cheatBox'; sec.appendChild(box); }
+    const row = (k, label, on) => `<div class="ckRow"><span>${label}</span><div class="seg ckSeg" data-k="${k}"><button data-v="0" class="${on ? '' : 'on'}">OFF</button><button data-v="1" class="${on ? 'on' : ''}">ON</button></div></div>`;
+    box.innerHTML = row('neck', '首のばし', this.neckShow) + (this.isNekoMe() ? row('cheat', 'チート', this.cheat) : '');   // 首のばしは全員、チートは nekojita だけ
+    box.querySelectorAll('.ckSeg button').forEach(b => {
+      b.onclick = () => {
+        const v = b.dataset.v === '1', k = b.parentElement.dataset.k;
+        if (k === 'neck') { this.neckShow = v; if (!v) this.resetNeck(); }
+        else this.cheat = v;
+        Snd.click(); this.renderCheatBox(); this.updateHUD();
+      };
+    });
+  },
+  setupNeckUI() {
+    const drag = (el, fn) => {
+      let id = null;
+      const at = e => { const r = el.getBoundingClientRect(); fn(e.clientX - r.left, e.clientY - r.top, r); };
+      el.addEventListener('pointerdown', e => { id = e.pointerId; try { el.setPointerCapture(id); } catch (er) { /* */ } at(e); e.preventDefault(); e.stopPropagation(); });
+      el.addEventListener('pointermove', e => { if (e.pointerId === id) { at(e); e.preventDefault(); } });
+      const end = e => { if (e.pointerId === id) id = null; };
+      el.addEventListener('pointerup', end); el.addEventListener('pointercancel', end);
+    };
+    drag($('#ngLen'), (x, y, r) => { this.neck.len = clamp(1 - (y - 12) / (r.height - 24), 0, 1); this.renderNeckUI(); });
+    drag($('#ngDir'), (x, y, r) => { let d = clamp((x - 12) / (r.width - 24) * 2 - 1, -1, 1); if (Math.abs(d) < 0.08) d = 0; this.neck.dir = d; this.renderNeckUI(); });
+    $('#ngReset').onclick = () => { this.neck.len = 0; this.neck.dir = 0; this.renderNeckUI(); Snd.click(); };
+    this.renderNeckUI();
+  },
+  renderNeckUI() {
+    $('#ngLen').style.setProperty('--v', this.neck.len.toFixed(3));
+    $('#ngLenVal').textContent = Math.round(this.neck.len * 100);
+    $('#ngDir').style.setProperty('--v', ((this.neck.dir + 1) / 2).toFixed(3));
+  },
+  resetNeck() { this.neck.len = 0; this.neck.dir = 0; this.renderNeckUI(); },
+  // チート（カード）: 場に出されたカードの中身を、山の上に表示
+  renderCheat(st, inGame) {
+    const el = $('#cheatPile'), x = this.priv && this.priv.x;
+    const on = this.cheat && inGame && st.md === 'card' && this.isNekoMe() && x && Array.isArray(x.pl);
+    el.classList.toggle('hidden', !on);
+    if (!on) return;
+    const rows = x.pl.slice(-4).map((p, k, arr) => {
+      const last = k === arr.length - 1, nm = st.pl[p.s] ? st.pl[p.s].n : '?';
+      const cards = (p.c || []).map(c => cardHTML(c, c !== st.tc && c !== 'J' ? 'lie' : '')).join('');
+      return `<div class="cr${last ? ' last' : ''}"><span class="cn">${last ? '直前 ' : ''}${esc(nm)}</span><span class="cc">${cards}</span></div>`;
+    }).join('');
+    const html = `<div class="ch">🐱 場のカード${x.pl.length > 4 ? `（最新4回／全${x.pl.length}回）` : ''}</div>${rows || '<div class="cr none">まだ出ていません</div>'}`;
+    if (html !== this._cheatHtml) { el.innerHTML = html; this._cheatHtml = html; }
+  },
+  placeCheat() {
+    const el = $('#cheatPile');
+    if (el.classList.contains('hidden')) return;
+    const p = this.world.screenOf(0, 0.84, 0), w = innerWidth, h = innerHeight;
+    const ew = el.offsetWidth || 180, eh = el.offsetHeight || 80;
+    const dock = this._dock || 160;
+    let x = p.behind ? w / 2 : p.x, y = p.behind ? h * 0.45 : p.y - 14;
+    x = clamp(x, ew / 2 + 8, w - ew / 2 - 8); y = clamp(y, 70 + eh, h - dock - 8);
+    el.style.transform = `translate(${(x - ew / 2).toFixed(0)}px, ${(y - eh).toFixed(0)}px)`;
   },
   // ---- クイックガイド ----
   showQuick(mode, force) {
@@ -165,6 +233,7 @@ export const App = {
     $('#lobbyRules').onclick = () => { Snd.click(); this.openRules(this.st ? this.st.md : 'card', 'game'); };
     $('#lobbyQuick').onclick = () => { Snd.click(); this.showQuick(this.st ? this.st.md : 'card', true); };
     $('#helpBtn').onclick = () => { Snd.click(); this.openRules(this.st && this.st.ph !== 'lobby' ? this.st.md : 'basic', 'game'); };
+    this.setupNeckUI();
     $$('.back').forEach(b => b.onclick = () => this.show('title'));
     $$('#cMode button').forEach(b => b.onclick = () => { $$('#cMode button').forEach(x => x.classList.toggle('on', x === b)); this.mode = b.dataset.m; });
     $$('#lMode button').forEach(b => b.onclick = () => { if (this.engine && this.role !== 'guest') { this.engine.setMode(b.dataset.m); Snd.click(); } });
@@ -340,8 +409,9 @@ export const App = {
     if (this.net && now - this.hdT > 90) {
       this.hdT = now;
       const hd = [Math.round(this.world.look.yaw * 100) / 100, Math.round(this.world.look.pitch * 100) / 100];
-      const k = hd.join(',');
-      if (k !== this.lastHd) { this.lastHd = k; this.net.set({ hd }); }
+      const nk = this.neckOK ? [Math.round(this.neck.len * 100) / 100, Math.round(this.neck.dir * 100) / 100] : [0, 0];
+      const k = hd.join(',') + '|' + (nk ? nk.join(',') : '');
+      if (k !== this.lastHd) { this.lastHd = k; this.net.set(nk ? { hd, nk } : { hd }); }
     }
   },
   tick(dt, rawDt = dt) {
@@ -349,6 +419,7 @@ export const App = {
     if (this.st) this.applyLooks(dt);
     this.world.update(dt, rawDt);
     this.world.render();
+    this.placeCheat();
     this.updateTimer();
     if (this.st && now - (this._lastSync || 0) > 300) { this._lastSync = now; this.world.sync(this.st, this.priv); this.refreshLabels(); this.updateDock(); }
   },
@@ -477,6 +548,7 @@ export const App = {
     switch (ev.t) {
       case 'start':
         $('#quick').classList.add('hidden');
+        this.resetNeck();
         this.feed('席替え！ 今回の席順はランダムです');
         W.resetTable(ev.md); W.setPlayers(st, this.mySeat);
         $('#lobbyScr').classList.add('hidden'); $('#overScr').classList.add('hidden');
@@ -487,6 +559,7 @@ export const App = {
       case 'play': W.evPlay(ev); this.feed(`${nm(ev.s)}：${CARD_LABEL[ev.tc]}を${ev.n}枚 出した`); this.bubble(ev.s, `${CARD_LABEL[ev.tc]} ×${ev.n}`); break;
       case 'liar': W.evLiar(ev); this.feed(`${nm(ev.s)} → ${nm(ev.tg)}「ライアー！」${ev.fz ? '（自動）' : ''}`); this.bubbles = {}; break;
       case 'shot':
+        if (ev.s === this.mySeat) this.resetNeck();   // 自分が撃つときは首を戻す
         W.evShot(ev);
         this.feed(`${nm(ev.s)} がシリンダーを回す…`);
         break;
@@ -498,6 +571,7 @@ export const App = {
       case 'bid': W.evBid(ev); this.feed(`${nm(ev.s)}：「${ev.f}の目が${ev.q}個以上」`); this.bubble(ev.s, `${ev.f}の目 ×${ev.q}`, 60000); break;
       case 'dliar': W.evDiceLiar(ev); this.feed(`${nm(ev.s)} → ${nm(ev.tg)}「ライアー！」`); this.revealInfo = { ev, rows: {}, order: [], total: 0 }; break;
       case 'drink':
+        if (ev.s === this.mySeat) this.resetNeck();
         W.evDrink(ev);
         this.feed(`${nm(ev.s)} が毒を飲む…`);
         setTimeout(() => this.feed(ev.fatal ? `💀 ${nm(ev.s)} は死亡した` : `${nm(ev.s)} は耐えた（毒 ${ev.n}/2）`), 3400);
@@ -541,11 +615,16 @@ export const App = {
     const peers = this.net ? this.net.peers() : [];
     for (let i = 0; i < 4; i++) {
       const p = st.pl[i], s = W.seats[i];
-      if (!p || !s.av || i === this.mySeat) continue;
+      if (!p || !s.av) continue;
+      if (i === this.mySeat) { s.av.setNeck(this.neckOK ? this.neck.len : 0, this.neck.dir); continue; }
       if (p.b) { this.simBotLook(i, dt); continue; }
       const peer = peers.find(x => x.peer === p.id);
       const hd = peer && peer.presence && peer.presence.hd;
       if (Array.isArray(hd) && hd.length === 2 && isFinite(hd[0]) && isFinite(hd[1])) s.av.look(+hd[0], +hd[1]);
+      // 首のばし（他の人の画面にも同じように見える）
+      const nk = peer && peer.presence && peer.presence.nk;
+      if (p.a && Array.isArray(nk) && nk.length === 2 && isFinite(nk[0]) && isFinite(nk[1])) s.av.setNeck(+nk[0], +nk[1]);
+      else s.av.setNeck(0, 0);
     }
   },
   simBotLook(i, dt) {
@@ -592,7 +671,10 @@ export const App = {
       }
       if (st.ph === 'lobby') status = p.b ? 'CPU' : '準備OK';
       const bb = this.bubbles[i];
+      const cx = this.priv && this.priv.x;
+      const cheatDice = this.cheat && inGame && st.md === 'dice' && cx && Array.isArray(cx.dd) && Array.isArray(cx.dd[i]) && p.a && this.isNekoMe() ? cx.dd[i] : null;
       this.world.setLabel(i, {
+        dice: cheatDice,
         name: p.n + (i === this.mySeat ? '（あなた）' : ''),
         status,
         turn: st.ph === 'turn' && st.tu === i,
@@ -609,11 +691,16 @@ export const App = {
     if (st.ph === 'lobby') this.renderLobby();
     const inGame = st.ph !== 'lobby';
     const me = this.mySeat >= 0 ? st.pl[this.mySeat] : null;
+    // 隠しコマンド nekojita: 首伸ばしゲージとチート表示
+    this.neckOK = !!(this.neckShow && inGame && st.ph !== 'over' && me && me.a && !me.lf && !this.world.ghost);
+    $('#neckUI').classList.toggle('hidden', !this.neckOK);
+    if (!this.neckOK && this.neck.len) this.resetNeck();
+    this.renderCheat(st, inGame);
     // table info
     const ti = $('#tableinfo');
     if (!inGame) ti.innerHTML = `<b>${st.md === 'card' ? 'カード' : 'ダイス'}</b><span class="sub">${this.role === 'offline' ? 'CPU練習' : 'ロビー ' + esc(this.lobbyId)}</span>`;
     else if (st.md === 'card') ti.innerHTML = st.tc ? `<b>${CARD_LABEL[st.tc]} のテーブル</b><span class="sub">場 ${st.pile}枚${st.lp ? '・直前 ' + (st.pl[st.lp.s] ? esc(st.pl[st.lp.s].n) : '') + ' ' + st.lp.n + '枚' : ''}</span>` : '';
-    else ti.innerHTML = `<b>ダイス</b><span class="sub">場に全${this.totalDice()}個・1はワイルド</span>`;
+    else ti.innerHTML = `<b>ダイス</b><span class="sub">場に全${this.totalDice()}個</span>`;
     // turn info
     const tt = $('#turntext'), tinfo = $('#turninfo');
     let txt = '';
@@ -662,11 +749,11 @@ export const App = {
     if (!myTurn) this._turnKey = null;
     this.updateActions();
   },
-  // 自分のダイスで、その目に数えられる個数（1はワイルド）
+  // 自分のダイスで、その目の個数（宣言した目だけを数える）
   myCount(f) {
     const st = this.st, d = this.priv && this.priv.d;
     if (!st || !d || !d.length || this.priv.r !== st.rn) return null;
-    return d.filter(v => v === f || (f !== 1 && v === 1)).length;
+    return d.filter(v => v === f).length;
   },
   // ダイスモードのベット表示（いま「何の目」が「何個以上」か）
   renderBid() {
@@ -702,7 +789,21 @@ export const App = {
     el.innerHTML = `<div class="bb-label">いまのベット（${s === this.mySeat ? 'あなた' : nm(s)}）</div>` +
       `<div class="bb-main">${dieHTML(f)}<span>が <b>${q}個</b> 以上</span></div>` +
       `<div class="bb-sub">場のダイス 全${this.totalDice()}個中</div>` +
-      (mine != null ? `<div class="bb-mine">あなたの手元：${dieHTML(f)} ×${mine}${f !== 1 ? '（1をふくむ）' : ''}</div>` : '');
+      (mine != null ? `<div class="bb-mine">あなたの手元：${dieHTML(f)} ×${mine}</div>` : '') + this.cheatVerdict(f, q, 'bb');
+  },
+  // チート（nekojita・ダイス）: 全員のダイスから、その目が実際に何個あるか
+  cheatCount(f) {
+    const st = this.st, x = this.priv && this.priv.x;
+    if (!this.cheat || !st || st.md !== 'dice' || !x || !Array.isArray(x.dd) || !this.isNekoMe()) return null;
+    let n = 0; for (const d of x.dd) if (Array.isArray(d)) for (const v of d) if (v === f) n++;
+    return n;
+  },
+  cheatVerdict(f, q, kind) {
+    const n = this.cheatCount(f);
+    if (n == null) return '';
+    const ok = n >= q;
+    if (kind === 'bb') return `<div class="bb-cheat ${ok ? 'ok' : 'ng'}">🐱 実際は ${dieHTML(f)} ×${n} → ${ok ? '足りている（本当）' : '足りない（ウソ）'}</div>`;
+    return `<span class="cheatTag ${ok ? 'ok' : 'ng'}">🐱 実際${n}個・${ok ? '行ける' : '足りない'}</span>`;
   },
   updateDock() {
     const md = $('#mydice');
@@ -747,7 +848,7 @@ export const App = {
           : prevOut ? `⚠ ${st.pl[st.lp.s].n} は手札を出し切った！ 出すと相手の「あがり」。疑うなら「ライアー！」`
           : (st.lp && st.lp.s !== this.mySeat ? `${CARD_LABEL[st.tc]}を1〜5枚選んで出す（嘘でもOK）／疑うなら「ライアー！」` : `${CARD_LABEL[st.tc]}を1〜5枚選んで出す（嘘でもOK）`);
       }
-      else tip = st.fz ? 'これ以上上乗せできません。告発してください' : (st.bid ? '個数を増やせば目は自由／同じ個数なら大きい目に／多すぎると思ったら「ライアー！」' : '「○の目が全員分でX個以上」をベット。1はワイルド');
+      else tip = st.fz ? 'これ以上上乗せできません。告発してください' : (st.bid ? '個数を増やせば目は自由／同じ個数なら大きい目に／多すぎると思ったら「ライアー！」' : '「○の目が全員分でX個以上」をベット。数えるのはその目だけ');
     }
     th.textContent = tip; th.classList.toggle('hidden', !tip);
     $('#cardActs').classList.toggle('hidden', !card);
@@ -772,7 +873,7 @@ export const App = {
       $('#bidBtn').disabled = !this.validBid(this.bidQ, this.bidF);
       $('#bidBtn').innerHTML = `${dieHTML(this.bidF)} ×${this.bidQ} ベット`;
       const mine = this.myCount(this.bidF);
-      $('#bidPreview').innerHTML = `「${dieHTML(this.bidF)} が <b>${this.bidQ}個</b> 以上」` + (mine != null ? `　手元 ${mine}個` : '');
+      $('#bidPreview').innerHTML = `「${dieHTML(this.bidF)} が <b>${this.bidQ}個</b> 以上」` + (mine != null ? `　手元 ${mine}個` : '') + this.cheatVerdict(this.bidF, this.bidQ, 'tag');
       $('#dLiarBtn').disabled = !(st.bid && st.bid.s !== this.mySeat);
     }
   },

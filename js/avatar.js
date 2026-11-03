@@ -185,6 +185,77 @@ function buildHat(kind, M) {
   return g;
 }
 
+// ===================== 首伸ばし（隠しコマンド nekojita） =====================
+// 座席ローカル座標（自分の席が原点、+z がテーブル中央、+x が自分の左）で、
+// 首の長さ len(0〜1) と向き dir(-1=左 〜 0=正面 〜 1=右) から、首の先（頭の付け根）の位置と顔の基本の向きを求める。
+const NK_SR = 0.98;
+const NK_UP = new THREE.Vector3(0, 1, 0);
+const NK_LEFT = new THREE.Vector3(1, 0, 0);   // 自分から見て左
+// 各相手について: 正面の経由点 F（手札の手前）→ 肩の外側の経由点 M → 肩越しに手札を覗く終点 E
+function nkPerson(pos, f, lat) {
+  return {
+    F: pos.clone().addScaledVector(f, 0.5).setY(0.97),
+    M: pos.clone().addScaledVector(f, 0.18).addScaledVector(lat, 0.42).setY(1.16),
+    E: pos.clone().addScaledVector(f, -0.03).addScaledVector(lat, 0.3).setY(1.1),
+    H: pos.clone().addScaledVector(f, 0.28).setY(0.92),   // 相手の手札
+  };
+}
+const NK_POS = { l: new THREE.Vector3(NK_SR, 0, NK_SR), o: new THREE.Vector3(0, 0, NK_SR * 2), r: new THREE.Vector3(-NK_SR, 0, NK_SR) };
+const NK_P = {
+  l: nkPerson(NK_POS.l, new THREE.Vector3(-1, 0, 0), new THREE.Vector3(0, 0, -1)),   // 左の人（肩は自分側）
+  r: nkPerson(NK_POS.r, new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 0, -1)),    // 右の人
+  oL: nkPerson(NK_POS.o, new THREE.Vector3(0, 0, -1), NK_LEFT),                        // 正面の人（自分から見て左側の肩）
+  oR: nkPerson(NK_POS.o, new THREE.Vector3(0, 0, -1), NK_LEFT.clone().negate()),       // 正面の人（右側の肩）
+};
+const nkSmooth = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+const nkF = new THREE.Vector3(), nkMp = new THREE.Vector3(), nkEp = new THREE.Vector3(), nkH = new THREE.Vector3(), nkA = new THREE.Vector3(), nkBv = new THREE.Vector3();
+const nkMix = (out, key, A, B, t) => out.lerpVectors(A[key], B[key], t);
+const nkOpp = { F: new THREE.Vector3(), M: new THREE.Vector3(), E: new THREE.Vector3(), H: new THREE.Vector3() };
+// len(0〜1): 首の長さ / dir(-1=左の人 〜 0=正面 〜 1=右の人)
+export function neckPose(len, dir, P0, out = { tip: new THREE.Vector3(), yaw: 0, pitch: 0 }) {
+  const u = -clamp(dir, -1, 1);   // +が左
+  // 正面の人のどちらの肩から覗くか（真ん中は左側の肩。少し右に動かすと頭の上を越えて右側の肩へ）
+  const side = u >= -0.1 ? 1 : u <= -0.24 ? -1 : 1 - 2 * nkSmooth(-0.1, -0.24, u);
+  const over = 1 - Math.abs(side);
+  const opp = nkOpp;
+  for (const k of ['F', 'M', 'E', 'H']) opp[k].lerpVectors(NK_P.oR[k], NK_P.oL[k], (side + 1) / 2);
+  opp.M.y += over * 0.3; opp.E.y += over * 0.32;
+  const nb = u >= 0 ? NK_P.l : NK_P.r, t = Math.abs(u);
+  nkMix(nkF, 'F', opp, nb, t); nkMix(nkMp, 'M', opp, nb, t); nkMix(nkEp, 'E', opp, nb, t); nkMix(nkH, 'H', opp, nb, t);
+  const L = clamp(len, 0, 1), K = 0.55;
+  if (L <= K) {
+    const e = L / K;
+    out.tip.copy(P0).lerp(nkF, e).addScaledVector(NK_UP, Math.sin(e * Math.PI) * 0.02);
+  } else {
+    const e = (L - K) / (1 - K);   // F → M → E（肩の外側を回り込んで肩越しへ）
+    nkA.copy(nkF).lerp(nkMp, e); nkBv.copy(nkMp).lerp(nkEp, e);
+    out.tip.copy(nkA).lerp(nkBv, e);
+  }
+  // 顔の向き = 首の向き（ゲージで決めた方向）だけ。手札の方へ勝手に向けたりはしない（向きは視点操作で自分で動かす）
+  out.yaw = Math.atan2(nkF.x - P0.x, nkF.z - P0.z) * nkSmooth(0, 0.15, L);
+  out.pitch = 0;
+  return out;
+}
+const NK_N = 44, NK_R = 14;
+function makeNeckGeo() {
+  const g = new THREE.BufferGeometry();
+  const n = (NK_N + 1) * (NK_R + 1);
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
+  g.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
+  const uv = new Float32Array(n * 2), idx = [];
+  for (let i = 0; i <= NK_N; i++) for (let j = 0; j <= NK_R; j++) { const k = i * (NK_R + 1) + j; uv[k * 2] = j / NK_R; uv[k * 2 + 1] = i / NK_N * 3; }
+  for (let i = 0; i < NK_N; i++) for (let j = 0; j < NK_R; j++) {
+    const a = i * (NK_R + 1) + j, b = a + NK_R + 1, c = b + 1, d = a + 1;
+    idx.push(a, d, b, d, c, b);   // 外向き
+  }
+  g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  g.setIndex(idx);
+  return g;
+}
+const nkM = new THREE.Matrix4(), nkInv = new THREE.Matrix4(), nkQn = new THREE.Quaternion(), nkQ = new THREE.Quaternion(), nkE = new THREE.Euler(0, 0, 0, 'YXZ');
+const nkB = new THREE.Vector3(), nkP0 = new THREE.Vector3(), nkD = new THREE.Vector3(), nkV1 = new THREE.Vector3(), nkV2 = new THREE.Vector3(), nkPt = new THREE.Vector3();
+const nkPose = { tip: new THREE.Vector3(), yaw: 0, pitch: 0 };
+
 export class Avatar {
   constructor(ci) {
     ci = ci % 4;
@@ -221,6 +292,11 @@ export class Avatar {
     // ---- 首と頭 ----
     this.neck = new THREE.Group(); this.neck.position.set(0, 0.615, 0); this.torso.add(this.neck);
     const nk = Models.mesh(new THREE.CylinderGeometry(0.048, 0.058, 0.11, 28), M.body); nk.position.set(0, 0.02, 0.0); this.neck.add(nk);
+    this.nkMesh = nk;
+    // 伸びる首（ふだんは非表示）
+    this.neckTube = new THREE.Mesh(makeNeckGeo(), M.body); this.neckTube.visible = false; this.neckTube.castShadow = true; this.neckTube.frustumCulled = false;
+    this.nkCurve = new THREE.CubicBezierCurve3(new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3());
+    this.nkTgt = { len: 0, dir: 0 }; this.nkLen = 0; this.nkDir = 0;
     if (C.vz.kind !== 'skin') { const col = Models.mesh(new THREE.CylinderGeometry(0.06, 0.066, 0.035, 32, 1, true), M.shirt); col.position.set(0, 0.008, 0.002); col.scale.z = 0.95; this.neck.add(col); }
     this.head = new THREE.Group(); this.head.rotation.order = 'YXZ'; this.head.position.set(0, 0.05, 0); this.neck.add(this.head);
     this.headC = new THREE.Group(); this.headC.position.set(0, 0.105, 0.014); this.headC.scale.setScalar(1.06); this.head.add(this.headC);
@@ -302,6 +378,7 @@ export class Avatar {
     this.blinkT = 2 + Math.random() * 3;
     this.lidOpen = C.lidOpen || 1;
     this.inv = new THREE.Matrix4();
+    this.root.add(this.neckTube);
     this.root.traverse(o => { if (o.isMesh) o.userData.av = this; });
   }
   makeArm(side) {
@@ -385,7 +462,55 @@ export class Avatar {
     const c = new THREE.Color(0xffffff).lerp(new THREE.Color(col || 0xffffff), amt || 0);
     this.M.face.color.copy(c); this.M.body.color.copy(c);
   }
-  look(yaw, pitch) { this.tYaw = clamp(yaw, -1.7, 1.7); this.tPitch = clamp(pitch, -1.0, 0.9); }
+  look(yaw, pitch) { this.tYaw = clamp(yaw, -3.1, 3.1); this.tPitch = clamp(pitch, -1.0, 0.9); }   // 首を伸ばしている間は後ろまで振り向ける
+  // 首の長さ(0〜1)と向き(-1左〜1右)
+  setNeck(len, dir) { this.nkTgt.len = clamp(+len || 0, 0, 1); this.nkTgt.dir = clamp(+dir || 0, -1, 1); }
+  applyNeck() {
+    const len = this.nkLen, P = this.pose;
+    this.body.updateMatrix(); this.torso.updateMatrix(); this.neck.updateMatrix();
+    nkM.multiplyMatrices(this.body.matrix, this.torso.matrix).multiply(this.neck.matrix);   // 首の付け根 → 体の座標
+    const B = nkB.set(0, 0, 0).applyMatrix4(nkM);
+    const P0 = nkP0.set(0, 0.05, 0).applyMatrix4(nkM);
+    const np = neckPose(len, this.nkDir, P0, nkPose);
+    // 顔: 首の向き＋視点の向き（視点を振っても首は動かず、顔だけが回る）
+    nkM.decompose(nkV1, nkQn, nkV2);
+    nkE.set(-(this.pitch + np.pitch) * this.lookW + P.hPitch, np.yaw + this.yaw * this.lookW + P.hYaw, P.hRoll, 'YXZ');
+    nkQ.setFromEuler(nkE).premultiply(nkQn.invert());
+    this.head.quaternion.slerp(nkQ, nkSmooth(0, 0.1, len));
+    nkInv.copy(nkM).invert();
+    this.head.position.copy(np.tip).applyMatrix4(nkInv);
+    this.updateNeckTube(B, np.tip, np.yaw);
+    this.neckTube.visible = true; this.nkMesh.visible = false;
+  }
+  // 体から弧を描いて伸び、頭の後ろ下につながる首
+  updateNeckTube(B, P, yaw) {
+    const L = B.distanceTo(P), Lc = Math.min(L, 1.3);
+    const D = nkD.set(P.x - B.x, 0, P.z - B.z);
+    if (D.lengthSq() < 1e-6) D.set(Math.sin(yaw), 0, Math.cos(yaw));
+    D.normalize();
+    const C = this.nkCurve;
+    C.v0.copy(B).addScaledVector(NK_UP, -0.085);
+    C.v1.copy(B).addScaledVector(NK_UP, 0.07 * Lc).addScaledVector(D, 0.26 * L);
+    C.v2.copy(P).addScaledVector(NK_UP, 0.05 * Lc).addScaledVector(D, -0.3 * L);
+    C.v3.copy(P).addScaledVector(NK_UP, 0.035);
+    C.needsUpdate = true; C.updateArcLengths();
+    const fr = C.computeFrenetFrames(NK_N, false);
+    const pos = this.neckTube.geometry.attributes.position, nor = this.neckTube.geometry.attributes.normal;
+    for (let i = 0; i <= NK_N; i++) {
+      const t = i / NK_N;
+      C.getPointAt(t, nkPt);
+      const r = (i < 3 ? 0.058 : 0.055 - 0.011 * t);
+      const N = fr.normals[i], Bn = fr.binormals[i];
+      for (let j = 0; j <= NK_R; j++) {
+        const th = j / NK_R * Math.PI * 2, cs = Math.cos(th), sn = Math.sin(th);
+        const nx = cs * N.x + sn * Bn.x, ny = cs * N.y + sn * Bn.y, nz = cs * N.z + sn * Bn.z;
+        const k = i * (NK_R + 1) + j;
+        pos.setXYZ(k, nkPt.x + nx * r, nkPt.y + ny * r, nkPt.z + nz * r);
+        nor.setXYZ(k, nx, ny, nz);
+      }
+    }
+    pos.needsUpdate = true; nor.needsUpdate = true;
+  }
   headWorld(out) { return this.headC.localToWorld(out.set(0, 0.005, 0)); }
 
   update(dt) {
@@ -398,8 +523,15 @@ export class Avatar {
     const shake = P.shake ? (Math.random() - 0.5) * P.shake : 0;
     this.body.position.set(P.bodyX, P.bodyY, 0);
     this.body.rotation.set(P.bodyRX, 0, P.bodyRZ);
-    this.torso.rotation.set(P.lean + breathe + shake * 0.5, this.yaw * 0.22 * this.lookW + P.twist, P.side + shake * 0.4);
-    this.head.rotation.set(-this.pitch * this.lookW + P.hPitch + shake, this.yaw * 0.78 * this.lookW + P.hYaw + shake * 0.6, P.hRoll + shake * 0.5);
+    const yawB = clamp(this.yaw, -1.7, 1.7);   // 体と、首を伸ばしていないときの頭はふだんの範囲まで
+    this.torso.rotation.set(P.lean + breathe + shake * 0.5, yawB * 0.22 * this.lookW + P.twist, P.side + shake * 0.4);
+    this.head.rotation.set(-this.pitch * this.lookW + P.hPitch + shake, yawB * 0.78 * this.lookW + P.hYaw + shake * 0.6, P.hRoll + shake * 0.5);
+    // 首伸ばし
+    const kn = 1 - Math.exp(-dt * 6), tl = this.dead ? 0 : this.nkTgt.len;
+    this.nkLen += (tl - this.nkLen) * kn; this.nkDir += (this.nkTgt.dir - this.nkDir) * kn;
+    if (tl === 0 && this.nkLen < 0.003) this.nkLen = 0;
+    if (this.nkLen > 0) this.applyNeck();
+    else if (this.neckTube.visible) { this.neckTube.visible = false; this.nkMesh.visible = true; this.head.position.set(0, 0.05, 0); }
     for (let i = this.handMoves.length - 1; i >= 0; i--) {
       const m = this.handMoves[i];
       m.t += dt;
@@ -510,6 +642,7 @@ export class Avatar {
   }
   reset() {
     this.dead = false; this.lookW = 1;
+    this.nkTgt.len = 0; this.nkTgt.dir = 0;
     Object.assign(this.pose, { lean: 0, side: 0, twist: 0, hYaw: 0, hPitch: 0, hRoll: 0, shake: 0, bodyY: 0, bodyX: 0, bodyRZ: 0, bodyRX: 0 });
     this.lhT = 'rest'; this.rhT = 'rest';
     this.handMoves.forEach(m => m.res()); this.handMoves = [];

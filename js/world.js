@@ -1,15 +1,16 @@
 // 3Dの世界: 描画、カメラ（一人称）、アニメーション、死亡演出
 import * as THREE from 'three';
-import { $, clamp, lerp, Ease, CARD_LABEL } from './util.js';
+import { $, clamp, lerp, Ease, CARD_LABEL, dieHTML } from './util.js';
 import { Tex } from './textures.js';
 import { Models, CARD_W, CARD_H } from './models.js';
-import { Avatar, V3, buildViewArm } from './avatar.js';
+import { Avatar, V3, buildViewArm, neckPose } from './avatar.js';
 import { Snd } from './audio.js';
 import { Post } from './post.js';
 
 const SEAT_R = 0.98;
 const EYE = new THREE.Vector3(0, 1.33, 0.0);
 const GHOST = new THREE.Vector3(0, 1.85, -0.45);
+const HEAD0 = new THREE.Vector3(0, 1.185, -0.02);   // ふだんの頭の付け根（座席ローカル）
 const CENTER = new THREE.Vector3(0, 0.79, 0);
 
 export class World {
@@ -90,6 +91,7 @@ export class World {
     this.vmCards = new THREE.Group(); this.vm.add(this.vmCards);
     this.vmLeft = new THREE.Group(); this.vmLeft.visible = false; this.vm.add(this.vmLeft);
     this.vmChar = -1;
+    this.vmScale = 1;
     this.vmLight = new THREE.PointLight(0xfff0e0, 0.35, 1.2, 2); this.vmLight.position.set(0.1, 0.3, 0.05); this.camera.add(this.vmLight);
     this.post = null;
     this.quality = 'high';
@@ -153,7 +155,7 @@ export class World {
       down.lx = e.clientX; down.ly = e.clientY;
       down.moved += Math.abs(dx) + Math.abs(dy);
       const sens = 0.0055 * (this.vfov / 70);
-      this.look.yaw = clamp(this.look.yaw - dx * sens, -1.7, 1.7);
+      const yl = this.yawLim(); this.look.yaw = clamp(this.look.yaw - dx * sens, -yl, yl);
       this.look.pitch = clamp(this.look.pitch - dy * sens, -1.0, 0.85);
     });
     const up = e => {
@@ -166,8 +168,9 @@ export class World {
     window.addEventListener('keydown', e => {
       if (e.target && /INPUT|TEXTAREA/.test(e.target.tagName)) return;
       const k = 0.08;
-      if (e.key === 'ArrowLeft') this.look.yaw = clamp(this.look.yaw + k, -1.7, 1.7);
-      if (e.key === 'ArrowRight') this.look.yaw = clamp(this.look.yaw - k, -1.7, 1.7);
+      const yl = this.yawLim();
+      if (e.key === 'ArrowLeft') this.look.yaw = clamp(this.look.yaw + k, -yl, yl);
+      if (e.key === 'ArrowRight') this.look.yaw = clamp(this.look.yaw - k, -yl, yl);
       if (e.key === 'ArrowUp') this.look.pitch = clamp(this.look.pitch + k, -1, 0.85);
       if (e.key === 'ArrowDown') this.look.pitch = clamp(this.look.pitch - k, -1, 0.85);
     });
@@ -292,6 +295,12 @@ export class World {
     this.particles.forEach(p => this.scene.remove(p.pts)); this.particles = [];
     this.fireRes = {};
   }
+  // 視点の左右の可動域: ふだんは約±97°、首を伸ばすと後ろ（約±175°）まで振り向ける
+  yawLim() {
+    const s = this.mySeat >= 0 ? this.seats[this.mySeat] : null;
+    const n = s && s.av && !this.ghost ? s.av.nkLen : 0;
+    return 1.7 + 1.35 * clamp(n / 0.3, 0, 1);
+  }
   defaultPitch() { return this.camera.aspect < 0.85 ? -0.14 : -0.3; }
   seatLocal(i, x, y, z) { return this.seats[i].g.localToWorld(new THREE.Vector3(x, y, z)); }
 
@@ -311,7 +320,8 @@ export class World {
           if (i === this.mySeat) this.enterGhost();
         }
         if (s.visualDead) s.gunHold.visible = false;
-        const showHeld = inGame && md === 'card' && p.a && p.hc > 0 && i !== this.mySeat;
+        const meOut = i === this.mySeat && !this.ghost && s.av.nkLen > 0.02;   // 首を伸ばしている間は自分の体も見える
+        const showHeld = inGame && md === 'card' && p.a && p.hc > 0 && (i !== this.mySeat || meOut);
         s.av.setHeld(showHeld ? p.hc : 0);
         if (!s.visualDead && !s.av.handMoves.length) {
           const tgt = showHeld ? 'cards' : 'rest';
@@ -477,18 +487,28 @@ export class World {
     if (!info) { if (s.label) { s.label.remove(); s.label = null; } return; }
     if (!s.label) {
       s.label = document.createElement('div'); s.label.className = 'plabel';
-      s.label.innerHTML = '<div class="pn"></div><div class="ps"></div><div class="pb"></div>';
+      s.label.innerHTML = '<div class="pn"></div><div class="ps"></div><div class="pd"></div><div class="pb"></div>';
       this.labelsEl.appendChild(s.label);
     }
     const L = s.label;
     L.querySelector('.pn').textContent = info.name;
     L.querySelector('.ps').textContent = info.status;
+    // チート（nekojita）: その人のサイコロの目
+    const pd = L.querySelector('.pd'), dk = info.dice ? info.dice.join('') : '';
+    if (pd.dataset.k !== dk) { pd.dataset.k = dk; pd.innerHTML = info.dice ? info.dice.map(v => dieHTML(v)).join('') : ''; pd.style.display = info.dice ? 'flex' : 'none'; }
     const pb = L.querySelector('.pb');
     pb.textContent = info.bubble || ''; pb.style.display = info.bubble ? 'block' : 'none';
     L.classList.toggle('turn', !!info.turn);
     L.classList.toggle('dead', !!info.dead);
     L.classList.toggle('me', i === this.mySeat);
     s.labelInfo = info;
+  }
+  // ワールド座標 → 画面座標（CSSピクセル）
+  screenOf(x, y, z) {
+    const v = this.tmpV.set(x, y, z);
+    const cs = this.tmpV2.copy(v).applyMatrix4(this.camera.matrixWorldInverse);
+    v.project(this.camera);
+    return { x: (v.x + 1) / 2 * this.canvas.clientWidth, y: (1 - v.y) / 2 * this.canvas.clientHeight, behind: cs.z > 0 };
   }
   updateLabels() {
     const w = this.canvas.clientWidth, h = this.canvas.clientHeight;
@@ -760,7 +780,7 @@ export class World {
   enterGhost() {
     this.ghost = true;
     const s = this.seats[this.mySeat];
-    if (s && s.av) s.av.root.visible = true;
+    if (s && s.av) { s.av.root.visible = true; s.av.head.visible = true; }
     this.handHide = 1;
   }
 
@@ -1103,7 +1123,7 @@ export class World {
     await this.wait(1.2);
     if (!this.alive(g)) return;
     this.diceReveal = true;
-    const match = v => v === ev.f || (ev.f !== 1 && v === 1);
+    const match = v => v === ev.f;   // 宣言した目だけ
     // 宣言した本人を最後にして、時計回りに公開
     const order = [];
     for (let k = 1; k <= 4; k++) { const i = (ev.tg + k) % 4; if (ev.dice[i]) order.push(i); }
@@ -1309,6 +1329,18 @@ export class World {
       if (raw >= 1) { this.tweens.splice(i, 1); tw.res(); }
     }
     for (const s of this.seats) if (s.av) s.av.update(dt);
+    // 自分の首を伸ばしている間は、自分の体と首を表示（頭はカメラの位置なので描かない）
+    const meS = this.mySeat >= 0 ? this.seats[this.mySeat] : null;
+    // 首を縮めたら視点もふだんの範囲へ戻す
+    { const yl = this.yawLim(); if (Math.abs(this.look.yaw) > yl) this.look.yaw = Math.sign(this.look.yaw) * Math.max(yl, Math.abs(this.look.yaw) - dt * 3); }
+    // 首を伸ばして他人に近づくと、自分の手札（ビューモデル）が相手の体に隠れてしまうので、
+    // カメラを中心に縮めて手前に寄せる（見た目の大きさ・位置は同じまま）
+    const vmS = meS && meS.av && !this.ghost ? 1 - 0.62 * clamp((meS.av.nkLen - 0.04) / 0.36, 0, 1) : 1;
+    if (Math.abs(vmS - this.vmScale) > 1e-4) { this.vmScale = vmS; this.vm.scale.setScalar(vmS); this.vmLight.intensity = 0.35 * vmS * vmS; }
+    if (meS && meS.av && !this.ghost) {
+      const out = meS.av.nkLen > 0.02;
+      if (meS.av.root.visible !== out) { meS.av.root.visible = out; meS.av.head.visible = !out; if (this.st) this.sync(this.st, this.priv); }
+    }
     if (this.revealFloat && this.revealCards.length && !this.pileBusy) this.revealCards.forEach((c, k) => { c.position.y = 0.97 + Math.sin(this.time * 2 + k) * 0.006; });
     // 取り残されたカードの掃除（0.5秒ごと）
     this.strayT += dt; if (this.strayT > 0.5) { this.strayT = 0; this.sweepStray(); }
@@ -1329,10 +1361,16 @@ export class World {
     } else {
       const s = this.seats[this.mySeat];
       eye = (this.ghost ? GHOST : EYE).clone();
+      // 首伸ばし: カメラ（目）は首の先の頭と一緒に動き、顔の向きは首の向き＋視点
+      let nkYaw = 0, nkPitch = 0;
+      if (!this.ghost && s.av && s.av.nkLen > 0) {
+        const np = neckPose(s.av.nkLen, s.av.nkDir, HEAD0, this._nkPose || (this._nkPose = { tip: new THREE.Vector3(), yaw: 0, pitch: 0 }));
+        eye.add(np.tip).sub(HEAD0); nkYaw = np.yaw; nkPitch = np.pitch;
+      }
       eye.y += F.dy; eye.z += F.dz;
       if (F.shake) { eye.x += (Math.random() - 0.5) * F.shake; eye.y += (Math.random() - 0.5) * F.shake; }
       this.camera.position.copy(s.g.localToWorld(eye));
-      const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(this.look.pitch + F.pitch + (F.shake ? (Math.random() - 0.5) * F.shake * 2 : 0), Math.PI + this.look.yaw, F.roll, 'YXZ'));
+      const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(clamp(this.look.pitch + nkPitch, -1.35, 1.0) + F.pitch + (F.shake ? (Math.random() - 0.5) * F.shake * 2 : 0), Math.PI + this.look.yaw + nkYaw, F.roll, 'YXZ'));
       this.camera.quaternion.copy(s.g.quaternion).multiply(q);
     }
     const fov = this.vfov + F.fov;

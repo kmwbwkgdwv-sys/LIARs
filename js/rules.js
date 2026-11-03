@@ -83,14 +83,14 @@ export const RULES_TABS = [
       <div class="example"><div>例：「${dieHTML(6)} が2個」の次は…</div>
         <div class="ok">○ 3個以上なら ${dieHTML(1)}${dieHTML(2)}${dieHTML(3)}${dieHTML(4)}${dieHTML(5)}${dieHTML(6)} どの目でもOK</div>
         <div class="ng">× 2個のまま（6より大きい目はないので不可）</div></div>
-      <h4>④ 1はワイルド</h4>
-      <p>${dieHTML(1)} はどの目としても数えます（${dieHTML(1)} そのものにベットした場合は ${dieHTML(1)} だけ数えます）。</p>
+      <h4>④ 数えるのは宣言した目だけ</h4>
+      <p>公開したら、<b>宣言した目と同じ目だけ</b>を数えます。${dieHTML(1)} もふつうの目で、ほかの目の代わりにはなりません。</p>
       <div class="example count">
-        <div>ベット「${dieHTML(3)} が5個以上」→ 公開すると…</div>
-        <div class="ex-row">${[3, 1, 5, 6, 2].map(v => dieHTML(v, v === 3 || v === 1 ? 'hit' : '')).join('')}</div>
-        <div class="ex-row">${[4, 3, 3, 6, 5].map(v => dieHTML(v, v === 3 || v === 1 ? 'hit' : '')).join('')}</div>
-        <div class="ex-row">${[2, 2, 6, 4, 1].map(v => dieHTML(v, v === 3 || v === 1 ? 'hit' : '')).join('')}</div>
-        <div>${dieHTML(3)}×3 ＋ ${dieHTML(1)}×2 ＝ <b>5個</b> → 宣言は本当だった</div>
+        <div>ベット「${dieHTML(3)} が4個以上」→ 公開すると…</div>
+        <div class="ex-row">${[3, 1, 5, 6, 2].map(v => dieHTML(v, v === 3 ? 'hit' : '')).join('')}</div>
+        <div class="ex-row">${[4, 3, 3, 6, 5].map(v => dieHTML(v, v === 3 ? 'hit' : '')).join('')}</div>
+        <div class="ex-row">${[2, 2, 6, 4, 1].map(v => dieHTML(v, v === 3 ? 'hit' : '')).join('')}</div>
+        <div>${dieHTML(3)}×3 ＝ <b>3個</b>（${dieHTML(1)} は数えない）→ 4個に足りないので宣言はウソ</div>
       </div>
       <h4>⑤ ペナルティ（毒）</h4>
       <div class="rule-grid">
@@ -126,7 +126,7 @@ export const QUICK = {
   ],
   dice: [
     { t: '目的', b: '最後の1人まで生き残る。読み合いに負けると毒を飲み、2本目で死亡します。' },
-    { t: '自分の番', b: '「○の目がテーブル全体でX個以上」とベット。個数を増やすなら目はどれでもOK（例：6が2個 → 次は3個以上ならどの目でも）。同じ個数なら大きい目に。1はワイルドです。' },
+    { t: '自分の番', b: '「○の目がテーブル全体でX個以上」とベット。個数を増やすなら目はどれでもOK（例：6が2個 → 次は3個以上ならどの目でも）。同じ個数なら大きい目に。数えるのは宣言した目だけ（1もふつうの目）。' },
     { t: '疑うなら', b: '前のベットが多すぎると思ったら「ライアー！」。全員のダイスを公開して数えます。' },
   ],
 };
