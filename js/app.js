@@ -672,9 +672,17 @@ export const App = {
       if (st.ph === 'lobby') status = p.b ? 'CPU' : '準備OK';
       const bb = this.bubbles[i];
       const cx = this.priv && this.priv.x;
-      const cheatDice = this.cheat && inGame && st.md === 'dice' && cx && Array.isArray(cx.dd) && Array.isArray(cx.dd[i]) && p.a && this.isNekoMe() ? cx.dd[i] : null;
+      // 死亡して観戦中の人だけ: 生きている全員の手札・ダイスを頭の上に表示
+      const meP = this.mySeat >= 0 ? st.pl[this.mySeat] : null;
+      const spec = !!(inGame && cx && cx.dead && meP && !meP.a);
+      const cheatOn = this.cheat && this.isNekoMe();
+      const showDice = inGame && st.md === 'dice' && cx && Array.isArray(cx.dd) && Array.isArray(cx.dd[i]) && p.a && (spec || cheatOn);
+      const showHand = spec && st.md === 'card' && Array.isArray(cx.hs) && Array.isArray(cx.hs[i]) && cx.hs[i].length && p.a;
       this.world.setLabel(i, {
-        dice: cheatDice,
+        dice: showDice ? cx.dd[i] : null,
+        diceCheat: showDice && !spec,
+        hand: showHand ? cx.hs[i] : null,
+        tc: st.tc,
         name: p.n + (i === this.mySeat ? '（あなた）' : ''),
         status,
         turn: st.ph === 'turn' && st.tu === i,
@@ -832,7 +840,7 @@ export const App = {
       let h = '';
       if (pending) h = '送信中…';
       else if (st.ph === 'turn' && me && me.a) h = `${st.pl[st.tu] ? st.pl[st.tu].n : '?'} の番を待っています`;
-      else if (st.ph === 'turn' && (!me || !me.a)) h = '観戦中：ドラッグで見回せます';
+      else if (st.ph === 'turn' && (!me || !me.a)) h = me ? '観戦中：全員の手札・ダイスが見えます（ドラッグで見回せます）' : '観戦中：ドラッグで見回せます';
       hint.textContent = h; hint.classList.toggle('hidden', !h || st.ph === 'over');
       return;
     }

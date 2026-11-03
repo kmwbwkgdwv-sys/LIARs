@@ -150,6 +150,24 @@ for (let k = 0; k < 50; k++) {
   ok(dx && dx.dd.filter(Boolean).length === 3 && dx.dd.every(v => !v || v.length === 5), 'neko sees all dice');
   ok(!d.privateFor(d.seatOf('o')).x, 'other player gets no dice of others');
 }
+// 死亡して観戦中の人だけ、生きている全員の手札／ダイスを受け取る
+{
+  const e = new Engine({ rng: seeded(9), now: () => 0 });
+  e.addPlayer('a', 'a'); e.addPlayer('b', 'b'); e.addPlayer('c', 'c'); e.start();
+  const a = e.seatOf('a'), b = e.seatOf('b'), c = e.seatOf('c');
+  ok(!e.privateFor(a).x && !e.privateFor(b).x, 'alive players get no extra data');
+  e.seats[a].alive = false; e.seats[a].hand = [];
+  const x = e.privateFor(a).x;
+  ok(x && x.dead && x.hs[b].join() === e.seats[b].hand.join() && x.hs[c].join() === e.seats[c].hand.join() && x.hs[a] === null, 'dead player sees all living hands');
+  ok(!e.privateFor(b).x, 'living player still sees nothing extra');
+  ok(!JSON.stringify(e.publicState()).includes('"hs"'), 'public state has no hands');
+  const d = new Engine({ rng: seeded(10), now: () => 0 }); d.setMode('dice');
+  d.addPlayer('a', 'a'); d.addPlayer('b', 'b'); d.addPlayer('c', 'c'); d.start();
+  const da = d.seatOf('a'); d.seats[da].alive = false;
+  const dx = d.privateFor(da).x;
+  ok(dx && dx.dead && dx.dd.filter(Boolean).length === 2 && dx.dd[da] === null, 'dead player sees all living dice');
+  ok(!d.privateFor(d.seatOf('b')).x, 'living dice player sees nothing extra');
+}
 console.log(JSON.stringify(stats));
 if (fail) { console.error(fail + ' failures'); process.exit(1); }
 console.log('すべてのテストに合格しました');

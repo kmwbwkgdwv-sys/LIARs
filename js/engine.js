@@ -429,11 +429,20 @@ export class Engine {
     const s = this.seats[seat];
     if (!s) return null;
     const out = this.mode === 'card' ? { r: this.rn, h: s.hand.slice() } : { r: this.rn, d: s.dice.slice() };
-    // nekojita だけに追加情報（その人の暗号化された個人データにだけ入るので、他の人には届かない）
-    if (isNeko(s.name) && !s.bot) {
-      out.x = this.mode === 'card'
-        ? { pl: this.plays.map(p => ({ s: p.s, c: p.c.slice() })) }
-        : { dd: this.seats.map(p => (p && p.alive && p.dice.length ? p.dice.slice() : null)) };
+    // 追加情報は、その人の暗号化された個人データにだけ入るので、他の人には届かない
+    //  - nekojita（チート用）: 場に出たカードの記録／全員のダイス
+    //  - 死亡して観戦中の人: 生きている全員の手札／ダイス
+    const neko = isNeko(s.name) && !s.bot;
+    const dead = !s.alive && !s.bot && this.phase !== 'lobby';
+    if (neko || dead) {
+      out.x = {};
+      if (this.mode === 'card') {
+        if (neko) out.x.pl = this.plays.map(p => ({ s: p.s, c: p.c.slice() }));
+        if (dead) out.x.hs = this.seats.map(p => (p && p.alive ? p.hand.slice() : null));
+      } else {
+        out.x.dd = this.seats.map(p => (p && p.alive && p.dice.length ? p.dice.slice() : null));
+      }
+      if (dead) out.x.dead = 1;
     }
     return out;
   }

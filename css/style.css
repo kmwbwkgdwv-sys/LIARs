@@ -285,7 +285,14 @@ ul.ctrl li { margin: 4px 0; }
 #cheatPile .mini-card.joker { color: #6a2a9a; }
 #cheatPile .mini-card.lie { box-shadow: 0 0 0 2px var(--red2), 0 2px 4px rgba(0,0,0,.5); }
 #cheatPile .none { font-size: 11px; color: var(--mut); opacity: 1; }
-.plabel .pd { display: none; gap: 2px; justify-content: center; margin-top: 3px; padding: 2px 3px; border-radius: 6px; background: rgba(120,70,200,.25); outline: 1px solid rgba(167,123,240,.6); }
+.plabel .pd { display: none; gap: 2px; justify-content: center; margin-top: 3px; padding: 2px 3px; border-radius: 6px; background: rgba(0,0,0,.35); }
+.plabel .pd.cheat { background: rgba(120,70,200,.25); outline: 1px solid rgba(167,123,240,.6); }
+.plabel .ph { display: none; gap: 2px; justify-content: center; margin-top: 4px; }
+.plabel .ph .mini-card { width: 19px; height: 27px; border-radius: 3px; }
+.plabel .ph .mini-card b { font-size: 12px; }
+.plabel .ph .mini-card small { display: none; }
+.plabel .ph .mini-card.joker { color: #6a2a9a; }
+.plabel .ph .mini-card.other { opacity: .72; }
 .plabel .pd .die { font-size: 14px; }
 .cheatBox { margin-top: 85vh; padding-bottom: 8px; display: flex; flex-direction: column; gap: 6px; }   /* しばらく空白を空けて、いちばん下までスクロールすると見える */
 .ckRow { display: flex; align-items: center; gap: 10px; }

@@ -1,6 +1,6 @@
 // 3Dの世界: 描画、カメラ（一人称）、アニメーション、死亡演出
 import * as THREE from 'three';
-import { $, clamp, lerp, Ease, CARD_LABEL, dieHTML } from './util.js';
+import { $, clamp, lerp, Ease, CARD_LABEL, dieHTML, cardHTML } from './util.js';
 import { Tex } from './textures.js';
 import { Models, CARD_W, CARD_H } from './models.js';
 import { Avatar, V3, buildViewArm, neckPose } from './avatar.js';
@@ -536,15 +536,18 @@ export class World {
     if (!info) { if (s.label) { s.label.remove(); s.label = null; } return; }
     if (!s.label) {
       s.label = document.createElement('div'); s.label.className = 'plabel';
-      s.label.innerHTML = '<div class="pn"></div><div class="ps"></div><div class="pd"></div><div class="pb"></div>';
+      s.label.innerHTML = '<div class="pn"></div><div class="ps"></div><div class="ph"></div><div class="pd"></div><div class="pb"></div>';
       this.labelsEl.appendChild(s.label);
     }
     const L = s.label;
     L.querySelector('.pn').textContent = info.name;
     L.querySelector('.ps').textContent = info.status;
-    // チート（nekojita）: その人のサイコロの目
-    const pd = L.querySelector('.pd'), dk = info.dice ? info.dice.join('') : '';
-    if (pd.dataset.k !== dk) { pd.dataset.k = dk; pd.innerHTML = info.dice ? info.dice.map(v => dieHTML(v)).join('') : ''; pd.style.display = info.dice ? 'flex' : 'none'; }
+    // その人のサイコロの目（死亡して観戦中の人／nekojita のチート）
+    const pd = L.querySelector('.pd'), dk = info.dice ? info.dice.join('') + (info.diceCheat ? 'c' : '') : '';
+    if (pd.dataset.k !== dk) { pd.dataset.k = dk; pd.innerHTML = info.dice ? info.dice.map(v => dieHTML(v)).join('') : ''; pd.style.display = info.dice ? 'flex' : 'none'; pd.classList.toggle('cheat', !!info.diceCheat); }
+    // その人の手札（死亡して観戦中の人だけ）。場のカードと合わないものは少し暗く
+    const ph = L.querySelector('.ph'), hk = info.hand ? info.hand.join('') + info.tc : '';
+    if (ph.dataset.k !== hk) { ph.dataset.k = hk; ph.innerHTML = info.hand ? info.hand.map(c => cardHTML(c, c === info.tc || c === 'J' ? 'match' : 'other')).join('') : ''; ph.style.display = info.hand ? 'flex' : 'none'; }
     const pb = L.querySelector('.pb');
     pb.textContent = info.bubble || ''; pb.style.display = info.bubble ? 'block' : 'none';
     L.classList.toggle('turn', !!info.turn);
