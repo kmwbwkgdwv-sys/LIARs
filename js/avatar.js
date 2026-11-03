@@ -45,6 +45,21 @@ const POSE = {
   table: { palm: [0, -1, 0], curl: 0.12 },
 };
 
+// 輪郭光（リムライト）: どの席から見ても、人物の縁（特に上側）がほんのり青白く光って暗い背景から浮かび上がる
+export const RIM = { color: { value: new THREE.Color(0x8aa6ff) }, strength: { value: 0.42 } };
+function addRim(m) {
+  m.onBeforeCompile = (sh) => {
+    sh.uniforms.rimColor = RIM.color; sh.uniforms.rimStrength = RIM.strength;
+    sh.fragmentShader = 'uniform vec3 rimColor; uniform float rimStrength;\n' + sh.fragmentShader.replace('#include <opaque_fragment>', `{
+      vec3 rimN = normalize(normal); vec3 rimV = normalize(vViewPosition);
+      float rimF = pow(1.0 - clamp(dot(rimN, rimV), 0.0, 1.0), 3.0);
+      float rimUp = clamp(dot(rimN, normalize((viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz)) * 0.5 + 0.6, 0.0, 1.0);
+      outgoingLight += rimColor * rimStrength * rimF * rimUp * (0.3 + 0.7 * diffuseColor.rgb);
+    }
+    #include <opaque_fragment>`);
+  };
+  m.customProgramCacheKey = () => 'rim1';
+}
 const matCache = {};
 function charMats(ci) {
   if (matCache[ci]) return matCache[ci];
@@ -52,7 +67,7 @@ function charMats(ci) {
   const sk = Tex.skin(ci, C), bs = Tex.bodySkin(ci, C);
   const face = new THREE.MeshPhysicalMaterial({ map: Tex.tex(sk.map), normalMap: Tex.tex(sk.normal, null, false), normalScale: new THREE.Vector2(0.45, 0.45), roughness: 0.52, sheen: 0.22, sheenColor: new THREE.Color('#ffb4a0'), sheenRoughness: 0.6, clearcoat: 0.06, clearcoatRoughness: 0.6, envMapIntensity: 0.35 });
   const body = new THREE.MeshPhysicalMaterial({ map: Tex.tex(bs.map, [2, 2]), normalMap: Tex.tex(bs.normal, [2, 2], false), normalScale: new THREE.Vector2(0.35, 0.35), roughness: 0.55, sheen: 0.22, sheenColor: new THREE.Color('#ffb4a0'), sheenRoughness: 0.6, envMapIntensity: 0.35 });
-  const fab = (kind, col, alt, rep = [3, 3], o = {}) => { const f = Tex.fabric(kind, col, alt); return new THREE.MeshPhysicalMaterial(Object.assign({ map: Tex.tex(f.map, rep), normalMap: Tex.tex(f.normal, rep, false), normalScale: new THREE.Vector2(0.6, 0.6), roughness: 0.82, sheen: kind === 'velvet' ? 1 : 0.3, sheenColor: new THREE.Color(col).lerp(new THREE.Color('#ffffff'), 0.35), sheenRoughness: 0.5, envMapIntensity: 0.25 }, o)); };
+  const fab = (kind, col, alt, rep = [3, 3], o = {}) => { const f = Tex.fabric(kind, col, alt); return new THREE.MeshPhysicalMaterial(Object.assign({ map: Tex.tex(f.map, rep), normalMap: Tex.tex(f.normal, rep, false), normalScale: new THREE.Vector2(0.6, 0.6), roughness: 0.82, sheen: kind === 'velvet' ? 0.6 : 0.25, sheenColor: new THREE.Color(col).lerp(new THREE.Color('#ffffff'), 0.15), sheenRoughness: 0.55, envMapIntensity: 0.25 }, o)); };
   const jacket = fab(C.jacket.kind, C.jacket.color, C.jacket.alt, [3, 3]);
   const sleeve = C.sleeves ? fab('shirt', C.sleeves, null, [4, 4]) : jacket;
   const shirt = fab('shirt', '#d6d0c4', null, [4, 4]);
@@ -72,6 +87,7 @@ function charMats(ci) {
   const lash = new THREE.MeshStandardMaterial({ color: 0x0a0605, roughness: 0.6 });
   const mouth = new THREE.MeshStandardMaterial({ color: 0x1a0606, roughness: 0.9 });
   const teeth = new THREE.MeshPhysicalMaterial({ color: 0xe8e0cc, roughness: 0.3, clearcoat: 0.5 });
+  [face, body, jacket, sleeve, shirt, pants, shoe, hatF, band, vz, longHair, scalp, beard].forEach(m => m && addRim(m));
   return (matCache[ci] = { face, body, jacket, sleeve, shirt, pants, shoe, hatF, band, eye, scalp, beard, browL, browR, vz, longHair, lash, mouth, teeth });
 }
 
@@ -480,7 +496,7 @@ export class Avatar {
     nkInv.copy(nkM).invert();
     this.head.position.copy(np.tip).applyMatrix4(nkInv);
     this.updateNeckTube(B, np.tip, np.yaw);
-    this.neckTube.visible = true; this.nkMesh.visible = false;
+    this.neckTube.visible = true;   // ふだんの首（nkMesh）は残し、その中から伸ばす
   }
   // 体から弧を描いて伸び、頭の後ろ下につながる首
   updateNeckTube(B, P, yaw) {
@@ -489,8 +505,9 @@ export class Avatar {
     if (D.lengthSq() < 1e-6) D.set(Math.sin(yaw), 0, Math.cos(yaw));
     D.normalize();
     const C = this.nkCurve;
-    C.v0.copy(B).addScaledVector(NK_UP, -0.085);
-    C.v1.copy(B).addScaledVector(NK_UP, 0.07 * Lc).addScaledVector(D, 0.26 * L);
+    // ふだんの首の中から始まり、まずまっすぐ上に伸びてから相手の方へ曲がる（肩からではなく首から伸びて見える）
+    C.v0.copy(B).addScaledVector(NK_UP, 0.0);
+    C.v1.copy(B).addScaledVector(NK_UP, 0.15 + 0.05 * Lc).addScaledVector(D, 0.03 * L);
     C.v2.copy(P).addScaledVector(NK_UP, 0.05 * Lc).addScaledVector(D, -0.3 * L);
     C.v3.copy(P).addScaledVector(NK_UP, 0.035);
     C.needsUpdate = true; C.updateArcLengths();
@@ -499,7 +516,7 @@ export class Avatar {
     for (let i = 0; i <= NK_N; i++) {
       const t = i / NK_N;
       C.getPointAt(t, nkPt);
-      const r = (i < 3 ? 0.058 : 0.055 - 0.011 * t);
+      const r = 0.048 - 0.005 * t;
       const N = fr.normals[i], Bn = fr.binormals[i];
       for (let j = 0; j <= NK_R; j++) {
         const th = j / NK_R * Math.PI * 2, cs = Math.cos(th), sn = Math.sin(th);

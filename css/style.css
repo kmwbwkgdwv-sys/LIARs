@@ -287,7 +287,7 @@ ul.ctrl li { margin: 4px 0; }
 #cheatPile .none { font-size: 11px; color: var(--mut); opacity: 1; }
 .plabel .pd { display: none; gap: 2px; justify-content: center; margin-top: 3px; padding: 2px 3px; border-radius: 6px; background: rgba(120,70,200,.25); outline: 1px solid rgba(167,123,240,.6); }
 .plabel .pd .die { font-size: 14px; }
-.cheatBox { margin-top: 14px; display: flex; flex-direction: column; gap: 6px; }
+.cheatBox { margin-top: 85vh; padding-bottom: 8px; display: flex; flex-direction: column; gap: 6px; }   /* しばらく空白を空けて、いちばん下までスクロールすると見える */
 .ckRow { display: flex; align-items: center; gap: 10px; }
 .ckRow > span { font-size: 13px; color: var(--mut); min-width: 64px; }
 .ckSeg { width: 132px; }

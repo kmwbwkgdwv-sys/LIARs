@@ -30,9 +30,9 @@ export class World {
     this.camera = new THREE.PerspectiveCamera(70, 1, 0.02, 40);
     S.add(this.camera);
     // lights
-    S.add(new THREE.HemisphereLight(0x8a6a50, 0x140a05, 0.55));
+    S.add(new THREE.HemisphereLight(0x6a7590, 0x160c06, 0.5));   // 影側はわずかに青み（ランプの暖色と対比）
     const lamp = this.lamp = Models.lamp(); lamp.position.set(0, 2.05, 0); S.add(lamp);
-    const spot = this.spot = new THREE.SpotLight(0xffd29a, 38, 7, 0.95, 0.55, 1.6);
+    const spot = this.spot = new THREE.SpotLight(0xffd29a, 34, 7, 0.95, 0.55, 1.6);
     spot.position.set(0, 2.0, 0); spot.target.position.set(0, 0, 0);
     spot.castShadow = true; spot.shadow.mapSize.set(2048, 2048); spot.shadow.bias = -0.00025; spot.shadow.normalBias = 0.01; spot.shadow.radius = 4;
     spot.shadow.camera.near = 0.3; spot.shadow.camera.far = 5;
@@ -40,7 +40,7 @@ export class World {
     this.lampPt = new THREE.PointLight(0xffc080, 3.5, 6, 1.8); this.lampPt.position.set(0, 1.9, 0); S.add(this.lampPt);
     this.flashLight = new THREE.PointLight(0xffc870, 0, 6, 2); S.add(this.flashLight);
     Models.room(S);
-    const table = Models.table(); S.add(table);
+    const table = this.tableObj = Models.table(); S.add(table);
     // 酒場そのものを映り込み（環境マップ）として撮影する → 金属・ガラス・瞳がリアルに反射
     if (!window.__lowgfx) try {
       const pm = new THREE.PMREMGenerator(r);
@@ -56,6 +56,9 @@ export class World {
     dg.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     this.dust = new THREE.Points(dg, new THREE.PointsMaterial({ color: 0xffe0b0, size: 0.006, transparent: true, opacity: 0.5, depthWrite: false }));
     S.add(this.dust);
+    // ランプの光の筋（ランプと一緒に揺れる）とタバコの煙（環境マップの撮影後に追加）
+    this.beam = Models.lightBeam(); this.beam.position.y = (1.93 - 2.05) - this.beam.userData.h / 2; lamp.add(this.beam);
+    this.initSmoke(table.userData.smokeSrc);
 
     // seats
     this.seats = [];
@@ -116,7 +119,53 @@ export class World {
     window.addEventListener('resize', () => this.resize());
   }
 
-  // 画質: high = 高解像度+ブルーム+フィルム+MSAA / medium = 解像度控えめ / low = 軽量
+  // ---------- タバコの煙 ----------
+  initSmoke(src) {
+    const c = document.createElement('canvas'); c.width = c.height = 128;
+    const x = c.getContext('2d');
+    let seed = 11; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    for (let i = 0; i < 28; i++) {
+      const px = 64 + (rnd() - 0.5) * 56, py = 64 + (rnd() - 0.5) * 56, r = 12 + rnd() * 28;
+      const g = x.createRadialGradient(px, py, 0, px, py, r); g.addColorStop(0, 'rgba(255,255,255,0.2)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+      x.fillStyle = g; x.fillRect(0, 0, 128, 128);
+    }
+    x.globalCompositeOperation = 'destination-in';
+    const m = x.createRadialGradient(64, 64, 8, 64, 64, 64); m.addColorStop(0, 'rgba(0,0,0,1)'); m.addColorStop(1, 'rgba(0,0,0,0)');
+    x.fillStyle = m; x.fillRect(0, 0, 128, 128);
+    const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+    this.smokeSrc = src.clone(); this.smoke = []; this.smokeLife = 6.5;
+    const N = 18;
+    for (let k = 0; k < N; k++) {
+      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, color: 0xc2b29c, transparent: true, opacity: 0, depthWrite: false }));
+      sp.userData.noAO = true; sp.renderOrder = 3; sp.visible = false;
+      this.scene.add(sp);
+      this.smoke.push({ sp, t: -k * this.smokeLife / N, seed: k * 7.31, rot: (k * 1.7) % 6.28 });
+    }
+  }
+  updateSmoke(dt) {
+    if (!this.smoke) return;
+    const L = this.smokeLife, b = this.smokeSrc, T = this.time;
+    for (const p of this.smoke) {
+      p.t += dt;
+      if (p.t > L) { p.t -= L; p.seed = Math.random() * 100; }
+      if (p.t < 0) { p.sp.visible = false; continue; }
+      const u = p.t / L;
+      // ゆらゆら昇り、上ほど広がって薄くなる
+      const sway = (0.012 + u * 0.07);
+      const x = b.x + Math.sin(p.seed + T * 0.9 + u * 5) * sway + u * 0.06;
+      const z = b.z + Math.cos(p.seed * 1.3 + T * 0.7 + u * 4) * sway - u * 0.03;
+      const y = b.y + 0.01 + u * 0.62 + Math.sin(u * 3 + p.seed) * 0.01;
+      p.sp.position.set(x, y, z);
+      const sc = 0.025 + u * 0.24; p.sp.scale.set(sc, sc * 1.15, 1);
+      p.sp.material.rotation = p.rot + p.t * 0.22;
+      p.sp.material.opacity = 0.34 * Math.sin(Math.PI * Math.min(1, u * 1.1)) * (1 - u * 0.35);
+      p.sp.visible = true;
+    }
+    const em = this.tableObj && this.tableObj.userData.ember;
+    if (em) em.material.emissiveIntensity = 3 + Math.sin(T * 2.3) * 0.6 + Math.sin(T * 7.1) * 0.3;
+  }
+
+  // 画質: high = 高解像度+AO+ブルーム+フィルム+MSAA / medium = 解像度控えめ（AO・ブルームなし） / low = 軽量
   setQuality(q) {
     this.quality = q;
     const dpr = window.devicePixelRatio || 1;
@@ -130,7 +179,7 @@ export class World {
     const ms = q === 'high' ? 2048 : 1024;
     if (this.spot.shadow.mapSize.x !== ms) { this.spot.shadow.mapSize.set(ms, ms); if (this.spot.shadow.map) { this.spot.shadow.map.dispose(); this.spot.shadow.map = null; } }
     this.usePost = !!this.post && q !== 'low';
-    if (this.post) { this.post.bloom.enabled = q === 'high'; this.post.film.uniforms.ca.value = q === 'high' ? 0.0018 : 0.0; }
+    if (this.post) { this.post.bloom.enabled = q === 'high'; this.post.ao.enabled = q === 'high'; this.post.film.uniforms.ca.value = q === 'high' ? 0.0018 : 0.0; }
     this.resize();
   }
 
@@ -1351,6 +1400,8 @@ export class World {
     this.spot.intensity = 38 * fl; this.lampPt.intensity = 3.5 * fl;
     this.lamp.rotation.z = Math.sin(this.time * 0.6) * 0.015;
     this.dust.rotation.y += dt * 0.02;
+    this.beam.material.uniforms.time.value = this.time;
+    this.updateSmoke(dt);
     // camera
     const F = this.fx;
     let eye;

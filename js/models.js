@@ -10,6 +10,8 @@ export const Models = {
     const map = Tex.tex(texRes.map, repeat), normalMap = texRes.normal ? Tex.tex(texRes.normal, repeat, false) : null;
     return new THREE.MeshStandardMaterial(Object.assign({ map, normalMap, roughness: 0.8, envMapIntensity: 0.5 }, o));
   },
+  // MeshStandardMaterial → MeshPhysicalMaterial（つや・起毛などを足す）
+  phys(std, extra = {}) { const m = new THREE.MeshPhysicalMaterial(); THREE.MeshStandardMaterial.prototype.copy.call(m, std); m.defines = { STANDARD: '', PHYSICAL: '' }; std.dispose(); return Object.assign(m, extra); },
   mesh(geo, mat, cast = true, recv = true) { const m = new THREE.Mesh(geo, mat); m.castShadow = cast; m.receiveShadow = recv; return m; },
   _cardGeo: null, _cardMats: {},
   cardMat(type) {
@@ -35,7 +37,7 @@ export const Models = {
   room(scene) {
     const g = new THREE.Group();
     const W = 9, D = 9, H = 3.3;
-    const floor = this.mesh(new THREE.PlaneGeometry(W, D), this.pbr(Tex.wood('floor', '#3a2415', '#150a04', 8, 1024, 1024, 5), { roughness: 0.62, normalScale: new THREE.Vector2(0.8, 0.8) }, [3, 3]), false, true);
+    const floor = this.mesh(new THREE.PlaneGeometry(W, D), this.phys(this.pbr(Tex.wood('floor', '#3a2415', '#150a04', 8, 1024, 1024, 5), { roughness: 0.58, normalScale: new THREE.Vector2(0.8, 0.8) }, [3, 3]), { clearcoat: 0.28, clearcoatRoughness: 0.42 }), false, true);
     floor.rotation.x = -Math.PI / 2; g.add(floor);
     const wallMat = this.pbr(Tex.wall(), { roughness: 0.88 }, [4, 1]);
     const mkWall = (w, x, z, ry) => { const m = this.mesh(new THREE.PlaneGeometry(w, H), wallMat, false, true); m.position.set(x, H / 2, z); m.rotation.y = ry; g.add(m); };
@@ -115,13 +117,13 @@ export const Models = {
   },
   table() {
     const g = new THREE.Group();
-    const wood = this.pbr(Tex.wood('table', '#5a3420', '#20100a', 1, 1024, 1024, 17), { roughness: 0.5 });
+    const wood = this.phys(this.pbr(Tex.wood('table', '#5a3420', '#20100a', 1, 1024, 1024, 17), { roughness: 0.48 }), { clearcoat: 0.55, clearcoatRoughness: 0.28 });
     const top = this.mesh(new RoundedBoxGeometry(1.32, 0.07, 1.32, 3, 0.02), wood); top.position.y = 0.745; g.add(top);
-    const felt = this.mesh(new THREE.PlaneGeometry(1.12, 1.12), this.pbr(Tex.felt(), { roughness: 0.96, envMapIntensity: 0.15, normalScale: new THREE.Vector2(0.6, 0.6) }), false, true);
+    const felt = this.mesh(new THREE.PlaneGeometry(1.12, 1.12), this.phys(this.pbr(Tex.felt(), { roughness: 0.96, envMapIntensity: 0.15, normalScale: new THREE.Vector2(0.6, 0.6) }), { sheen: 0.7, sheenRoughness: 0.7, sheenColor: new THREE.Color(0x5aa070) }), false, true);
     felt.material.normalMap.wrapS = felt.material.normalMap.wrapT = THREE.RepeatWrapping; felt.material.normalMap.repeat.set(6, 6);
     felt.rotation.x = -Math.PI / 2; felt.position.y = 0.781; g.add(felt);
     // rim
-    const rimMat = this.m(0x2e180c, { roughness: 0.72 });
+    const rimMat = this.phys(this.pbr(Tex.wood('rim', '#3a1e0e', '#140804', 1, 512, 256, 29), { roughness: 0.5 }), { clearcoat: 0.7, clearcoatRoughness: 0.22 });
     for (let i = 0; i < 4; i++) {
       const r = this.mesh(new RoundedBoxGeometry(1.36, 0.05, 0.12, 2, 0.02), rimMat);
       const a = i * Math.PI / 2; r.position.set(Math.sin(a) * 0.62, 0.79, Math.cos(a) * 0.62); r.rotation.y = a; g.add(r);
@@ -131,8 +133,17 @@ export const Models = {
     // ashtray + stains
     const ash = new THREE.Group();
     const ab = this.mesh(new THREE.CylinderGeometry(0.06, 0.055, 0.025, 16), this.m(0x2a3a3a, { metalness: 0.2, roughness: 0.2, transparent: true, opacity: 0.85 })); ash.add(ab);
-    const butt = this.mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.05, 6), this.m(0xd8cbb0)); butt.rotation.z = 1.3; butt.position.set(0.02, 0.016, 0); ash.add(butt);
+    const butt = this.mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.05, 6), this.m(0xd8cbb0)); butt.rotation.z = 1.3; butt.position.set(-0.02, 0.016, 0.015); ash.add(butt);
+    // 火のついたタバコ（灰皿のふちに置き、先から煙が立ちのぼる）
+    const cig = new THREE.Group();
+    const paper = this.mesh(new THREE.CylinderGeometry(0.0042, 0.0042, 0.058, 10), this.m(0xeee6d6, { roughness: 0.85 })); paper.position.y = 0.029; cig.add(paper);
+    const filt = this.mesh(new THREE.CylinderGeometry(0.0043, 0.0043, 0.02, 10), this.m(0xc98a3a, { roughness: 0.8 })); filt.position.y = -0.01; cig.add(filt);
+    const ashTip = this.mesh(new THREE.CylinderGeometry(0.0041, 0.0042, 0.008, 10), this.m(0x6a6560, { roughness: 1 })); ashTip.position.y = 0.062; cig.add(ashTip);
+    const ember = new THREE.Mesh(new THREE.CylinderGeometry(0.0043, 0.0043, 0.003, 10), new THREE.MeshStandardMaterial({ color: 0x200500, emissive: 0xff4a10, emissiveIntensity: 3.5 })); ember.position.y = 0.0575; cig.add(ember);
+    cig.rotation.z = -1.42; cig.position.set(0.03, 0.017, -0.004); ash.add(cig);
     ash.position.set(0.44, 0.795, -0.44); g.add(ash);
+    g.userData.ember = ember;
+    g.userData.smokeSrc = new THREE.Vector3(0.44 + 0.03 + 0.066, 0.795 + 0.02, -0.444);
     return g;
   },
   chair() {
@@ -256,11 +267,45 @@ export const Models = {
     const qy = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw || 0);
     return qy.multiply(qf);
   },
+  // ランプの光の筋（たばこの煙で光が見える感じ）。縁ほど薄く、下に行くほどふわっと消える
+  lightBeam() {
+    const h = 1.1;
+    const geo = new THREE.CylinderGeometry(0.33, 0.7, h, 64, 16, true);
+    const mat = new THREE.ShaderMaterial({
+      uniforms: { time: { value: 0 }, color: { value: new THREE.Color(0xffd6a0) }, strength: { value: 0.2 } },
+      vertexShader: `varying vec3 vN; varying vec3 vV; varying float vH; varying vec3 vW;
+        void main(){ vH = position.y / ${h.toFixed(3)} + 0.5; vec4 wp = modelMatrix * vec4(position, 1.0); vW = wp.xyz;
+          vec4 mv = viewMatrix * wp; vV = -mv.xyz; vN = normalize(normalMatrix * normal); gl_Position = projectionMatrix * mv; }`,
+      fragmentShader: `uniform float time, strength; uniform vec3 color; varying vec3 vN; varying vec3 vV; varying float vH; varying vec3 vW;
+        float hash(vec3 p){ p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+        float noise(vec3 x){ vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
+          return mix(mix(mix(hash(i), hash(i + vec3(1, 0, 0)), f.x), mix(hash(i + vec3(0, 1, 0)), hash(i + vec3(1, 1, 0)), f.x), f.y),
+                     mix(mix(hash(i + vec3(0, 0, 1)), hash(i + vec3(1, 0, 1)), f.x), mix(hash(i + vec3(0, 1, 1)), hash(i + vec3(1, 1, 1)), f.x), f.y), f.z); }
+        void main(){
+          float facing = abs(dot(normalize(vN), normalize(vV)));
+          float edge = pow(facing, 3.0);
+          float vert = smoothstep(0.0, 0.6, vH) * (1.0 - smoothstep(0.7, 1.0, vH)) * (0.5 + 0.5 * vH);   // 上下とも端はふわっと消す
+          float n = noise(vW * 3.0 + vec3(0.0, -time * 0.1, time * 0.04)) * 0.6 + noise(vW * 7.5 + vec3(time * 0.07, -time * 0.18, 0.0)) * 0.4;
+          float a = edge * vert * (0.5 + 0.5 * n) * strength;
+          gl_FragColor = vec4(color * a, 1.0);
+        }`,
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+    });
+    const m = new THREE.Mesh(geo, mat); m.userData.noAO = true; m.renderOrder = 2;
+    m.userData.h = h;
+    return m;
+  },
   lamp() {
     const g = new THREE.Group();
     const shade = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.38, 0.24, 48, 1, true), new THREE.MeshStandardMaterial({ color: 0x1d3a26, roughness: 0.35, metalness: 0.6, side: THREE.DoubleSide, envMapIntensity: 1 }));
     shade.position.y = 0; g.add(shade);
-    const inner = new THREE.Mesh(new THREE.CylinderGeometry(0.099, 0.378, 0.238, 24, 1, true), new THREE.MeshStandardMaterial({ color: 0x8a6a40, emissive: 0xffb060, emissiveIntensity: 0.22, side: THREE.BackSide }));
+    // シェードの内側: 電球に近い上ほど明るいグラデーションで光る（下からのぞいても白く飛ばない）
+    const gc = document.createElement('canvas'); gc.width = 4; gc.height = 64;
+    const gx = gc.getContext('2d'), gg = gx.createLinearGradient(0, 0, 0, 64);
+    gg.addColorStop(0, '#fff2d0'); gg.addColorStop(0.35, '#e8b46a'); gg.addColorStop(1, '#5a3412');
+    gx.fillStyle = gg; gx.fillRect(0, 0, 4, 64);
+    const gt = new THREE.CanvasTexture(gc); gt.colorSpace = THREE.SRGBColorSpace;
+    const inner = new THREE.Mesh(new THREE.CylinderGeometry(0.099, 0.378, 0.238, 32, 1, true), new THREE.MeshBasicMaterial({ map: gt, color: new THREE.Color(1.6, 1.35, 1.1), side: THREE.BackSide }));
     g.add(inner);
     const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.045, 12, 10), new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xffd9a0, emissiveIntensity: 2.2 }));
     bulb.position.y = -0.06; g.add(bulb);
