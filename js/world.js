@@ -823,7 +823,8 @@ export class World {
     if (!this.alive(g) || tok !== this.tableTok) return;
     const take = await this.liftReveal(ev.cards, tok);
     if (!take || !this.alive(g)) return;
-    this.bigText(ev.lie ? `ハッタリで あがり！ → ${this.name(ev.s)}` : `あがり！ → ${this.name(ev.s)}`, 'gold', 2.4);
+    this.bigText(ev.lie ? `ハッタリで あがり！ → ${this.name(ev.s)}` : `あがり！ → ${this.name(ev.s)}`, 'gold', 2.0);
+    setTimeout(() => { if (this.alive(g)) this.bigText(`${this.name(ev.s)} 以外は全員 リボルバー`, 'red', 1.8); }, 2100);
     await this.wait(2.8);
     if (!this.alive(g)) return;
     await this.layDownReveal(take, tok);

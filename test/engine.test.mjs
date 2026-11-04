@@ -80,7 +80,7 @@ ok(e.act(t1, { t: 'bid', q: 5, f: 5 }) === 'turn', 'wrong turn rejected');
     }
   }
 }
-// あがり: 手札を出し切った後、次の人が告発せずに出したら勝ち
+// あがり: 手札を出し切った後、次の人が告発せずに出したら、出し切った人以外の全員がリボルバーを撃つ
 {
   const a = new Engine({ rng: seeded(7), now: () => 0 });
   a.addPlayer('x', 'x'); a.addPlayer('y', 'y'); a.addPlayer('z', 'z'); a.start();
@@ -89,8 +89,30 @@ ok(e.act(t1, { t: 'bid', q: 5, f: 5 }) === 'turn', 'wrong turn rejected');
   ok(a.act(x, { t: 'play', i: [0] }) === null, 'play last card');
   ok(a.seats[x].hand.length === 0 && a.phase === 'turn' && a.turn === nx, 'turn passes to next');
   ok(a.act(nx, { t: 'play', i: [0] }) === null, 'next plays instead of calling');
-  ok(a.phase === 'over' && a.winner === x, 'agari wins');
-  ok(a.events.some(e => e.t === 'agari' && e.s === x && e.lie === true), 'agari event records the (lying) cards');
+  ok(a.phase === 'agari', 'agari phase (cards shown) before the shots');
+  const ag = a.events.find(e => e.t === 'agari');
+  ok(ag && ag.s === x && ag.lie === true, 'agari event records the (lying) cards');
+  const others = [0, 1, 2, 3].filter(j => a.seats[j] && j !== x);
+  ok(ag.sh.length === 2 && ag.sh[0] === nx && ag.sh.every(j => others.includes(j)) && !ag.sh.includes(x), 'everyone except the emptied player is queued, starting with the one who missed');
+  // 全員が順番に撃つ（実弾を外しておく）
+  for (const j of others) { a.seats[j].bullet = 5; }
+  const shooters = [];
+  for (let step = 0; step < 20 && a.phase !== 'deal'; step++) {
+    a.phaseEnd = 0; a.update();
+    const last = a.events[a.events.length - 1];
+    if (last.t === 'shot') shooters.push(last.s);
+  }
+  ok(shooters.length === 2 && shooters[0] === nx && !shooters.includes(x), 'each other player shoots once, in order: ' + shooters.join(','));
+  ok(a.phase === 'deal' && a.turn === x && a.seats[x].alive, 'next round starts with the player who emptied their hand');
+  // 2人のときに相手が死ねば、出し切った人の勝ち
+  const c = new Engine({ rng: seeded(12), now: () => 0 });
+  c.addPlayer('x', 'x'); c.addPlayer('y', 'y'); c.start();
+  const cx = c.seatOf('x'), cy = c.seatOf('y');
+  c.beginTurn(cx); c.seats[cx].hand = ['Q']; c.table = 'Q';
+  c.act(cx, { t: 'play', i: [0] }); c.act(cy, { t: 'play', i: [0] });
+  c.seats[cy].bullet = c.seats[cy].shots;   // 次の1発が実弾
+  for (let step = 0; step < 10 && c.phase !== 'over'; step++) { c.phaseEnd = 0; c.update(); }
+  ok(c.phase === 'over' && c.winner === cx && !c.seats[cy].alive, 'two players: the other dies → emptied player wins');
   // 告発された場合は通常判定（あがりにならない）
   const b = new Engine({ rng: seeded(8), now: () => 0 });
   b.addPlayer('x', 'x'); b.addPlayer('y', 'y'); b.start();

@@ -158,7 +158,7 @@ export class Engine {
 
   newRound(starter) {
     this.rn++;
-    this.lastPlay = null; this.plays = []; this.bid = null; this.pile = 0; this.forced = false; this.loser = -1;
+    this.lastPlay = null; this.plays = []; this.bid = null; this.pile = 0; this.forced = false; this.loser = -1; this.shotQueue = null;
     const now = this.now();
     if (this.mode === 'card') {
       this.table = CARD_TYPES[Math.floor(this.rng() * 3)];
@@ -249,9 +249,13 @@ export class Engine {
         const prev = this.seats[lp.seat];
         if (prev && prev.alive && prev.hand.length === 0) {
           const lie = lp.cards.some(c => c !== this.table && c !== 'J');
-          this.ev({ t: 'agari', s: lp.seat, by: seat, cards: lp.cards.slice(), lie, tc: this.table });
-          this.winner = lp.seat; this.phase = 'over'; this.botAt = 0;
-          this.ev({ t: 'over', w: lp.seat, why: 'agari' });
+          // あがり: 出し切った人以外の全員が、順番にリボルバーを自分に撃つ（見逃した人から）
+          const queue = [];
+          for (let k = 0; k < 4; k++) { const j = (seat + k) % 4, p = this.seats[j]; if (p && p.alive && j !== lp.seat) queue.push(j); }
+          this.ev({ t: 'agari', s: lp.seat, by: seat, cards: lp.cards.slice(), lie, tc: this.table, sh: queue.slice() });
+          this.shotQueue = queue; this.agariSeat = lp.seat; this.loser = -1;
+          this.phase = 'agari'; this.phaseEnd = now + this.T.revealCard; this.botAt = 0;
+          this.touch();
           return null;
         }
       }
@@ -354,9 +358,23 @@ export class Engine {
     this.ev({ t: 'over', w: this.winner });
   }
 
-  afterPenalty() {
+  // あがりの後: 待ち行列の次の人が撃つ。全員撃ち終えたら次のラウンド（出し切った人から）
+  nextQueuedShot() {
+    while (this.shotQueue && this.shotQueue.length) {
+      const j = this.shotQueue.shift(), p = this.seats[j];
+      if (p && p.alive) { this.loser = j; this.penalty(); return; }
+    }
+    this.shotQueue = null;
     const alive = this.aliveSeats();
     if (alive.length <= 1) { this.finish(); return; }
+    const A = this.seats[this.agariSeat];
+    this.newRound(A && A.alive ? this.agariSeat : this.nextAliveAfter(this.agariSeat));
+  }
+
+  afterPenalty() {
+    const alive = this.aliveSeats();
+    if (alive.length <= 1) { this.shotQueue = null; this.finish(); return; }
+    if (this.shotQueue) { this.nextQueuedShot(); return; }
     const L = this.seats[this.loser];
     const st = L && L.alive ? this.loser : this.nextAliveAfter(this.loser >= 0 ? this.loser : 0);
     this.newRound(st);
@@ -369,7 +387,7 @@ export class Engine {
       if (s && s.left) this.seats[i] = null;
       else if (s) Object.assign(s, { alive: true, hand: [], dice: [], shots: 0, poison: 0 });
     }
-    this.phase = 'lobby'; this.turn = -1; this.lastPlay = null; this.plays = []; this.bid = null; this.pile = 0; this.winner = -1;
+    this.phase = 'lobby'; this.turn = -1; this.lastPlay = null; this.plays = []; this.bid = null; this.pile = 0; this.winner = -1; this.shotQueue = null;
     this.ev({ t: 'lobby' });
   }
 
@@ -391,6 +409,9 @@ export class Engine {
         break;
       case 'reveal':
         if (now >= this.phaseEnd) this.penalty();
+        break;
+      case 'agari':
+        if (now >= this.phaseEnd) this.nextQueuedShot();
         break;
       case 'shot':
         if (now < this.phaseEnd) break;

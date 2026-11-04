@@ -162,22 +162,31 @@ export const App = {
     $('#ngDir').style.setProperty('--v', ((this.neck.dir + 1) / 2).toFixed(3));
   },
   resetNeck() { this.neck.len = 0; this.neck.dir = 0; this.renderNeckUI(); },
-  // チート（カード）: 場に出されたカードの中身を、山の上に表示
+  // テーブルの真ん中: 直前の人が出した枚数を裏向きのカードで表示（nekojita がチートONなら表向き＋これまでの記録）
   renderCheat(st, inGame) {
-    const el = $('#cheatPile'), x = this.priv && this.priv.x;
-    const on = this.cheat && inGame && st.md === 'card' && this.isNekoMe() && x && Array.isArray(x.pl);
+    const el = $('#pilePanel'), x = this.priv && this.priv.x, lp = st.lp;
+    const cheat = !!(this.cheat && inGame && st.md === 'card' && this.isNekoMe() && x && Array.isArray(x.pl));
+    const base = !!(inGame && st.md === 'card' && st.ph === 'turn' && lp && lp.n > 0);
+    const on = cheat ? (x.pl.length > 0 || base) : base;
     el.classList.toggle('hidden', !on);
+    el.classList.toggle('cheat', cheat);
     if (!on) return;
-    const rows = x.pl.slice(-4).map((p, k, arr) => {
-      const last = k === arr.length - 1, nm = st.pl[p.s] ? st.pl[p.s].n : '?';
-      const cards = (p.c || []).map(c => cardHTML(c, c !== st.tc && c !== 'J' ? 'lie' : '')).join('');
-      return `<div class="cr${last ? ' last' : ''}"><span class="cn">${last ? '直前 ' : ''}${esc(nm)}</span><span class="cc">${cards}</span></div>`;
-    }).join('');
-    const html = `<div class="ch">🐱 場のカード${x.pl.length > 4 ? `（最新4回／全${x.pl.length}回）` : ''}</div>${rows || '<div class="cr none">まだ出ていません</div>'}`;
+    const who = s => (s === this.mySeat ? 'あなた' : (st.pl[s] ? st.pl[s].n : '?'));
+    let html;
+    if (cheat) {
+      const rows = x.pl.slice(-4).map((p, k, arr) => {
+        const last = k === arr.length - 1;
+        const cards = (p.c || []).map(c => cardHTML(c, c !== st.tc && c !== 'J' ? 'lie' : '')).join('');
+        return `<div class="cr${last ? ' last' : ''}"><span class="cn">${last ? '直前 ' : ''}${esc(who(p.s))}</span><span class="cc">${cards}</span></div>`;
+      }).join('');
+      html = `<div class="ch">🐱 場のカード${x.pl.length > 4 ? `（最新4回／全${x.pl.length}回）` : ''}</div>${rows || '<div class="cr none">まだ出ていません</div>'}`;
+    } else {
+      html = `<div class="lpH">${esc(who(lp.s))} が出した <b>${lp.n}枚</b></div><div class="lpC">${'<span class="mini-card back"></span>'.repeat(lp.n)}</div>`;
+    }
     if (html !== this._cheatHtml) { el.innerHTML = html; this._cheatHtml = html; }
   },
   placeCheat() {
-    const el = $('#cheatPile');
+    const el = $('#pilePanel');
     if (el.classList.contains('hidden')) return;
     const p = this.world.screenOf(0, 0.84, 0), w = innerWidth, h = innerHeight;
     const ew = el.offsetWidth || 180, eh = el.offsetHeight || 80;
@@ -581,6 +590,7 @@ export const App = {
         W.evAgari(ev);
         this.feed(`${nm(ev.by)} はライアーと言わなかった…`);
         this.feed(`🏆 ${nm(ev.s)} が手札を出し切って あがり！${ev.lie ? '（ハッタリだった）' : ''}`);
+        this.feed(`🔫 ${nm(ev.s)} 以外の全員がリボルバーを撃つ`);
         break;
       case 'over':
         setTimeout(() => {
@@ -639,7 +649,7 @@ export const App = {
         if (st.tu === i) { yaw = (Math.random() - 0.5) * 0.3; pitch = -0.55; }
         else if (Math.random() < 0.7) { yaw = rel(st.tu); pitch = -0.02; }
         else { yaw = (Math.random() - 0.5) * 1.6; pitch = -0.1 - Math.random() * 0.3; }
-      } else if (st.ph === 'reveal') { yaw = 0; pitch = -0.6; }
+      } else if (st.ph === 'reveal' || st.ph === 'agari') { yaw = 0; pitch = -0.6; }
       else { yaw = (Math.random() - 0.5) * 2; pitch = -0.1 - Math.random() * 0.3; }
       b.yaw = yaw; b.pitch = pitch;
     }
@@ -718,6 +728,7 @@ export const App = {
     else if (st.ph === 'deal') txt = 'カードを配っています';
     else if (st.ph === 'roll') txt = 'ダイスを振っています';
     else if (st.ph === 'reveal') txt = '公開中…';
+    else if (st.ph === 'agari') txt = 'あがり！';
     else if (st.ph === 'shot') txt = '🔫 ロシアンルーレット';
     else if (st.ph === 'drink') txt = '☠ 毒';
     else if (st.ph === 'over') txt = 'ゲーム終了';
@@ -833,7 +844,7 @@ export const App = {
     const me = this.mySeat >= 0 ? st.pl[this.mySeat] : null;
     const myTurn = st.ph === 'turn' && st.tu === this.mySeat && me && me.a;
     const pending = this.actPending && performance.now() - this.actPending < 3000;
-    this.world.handDown = (st.ph === 'reveal' || st.ph === 'shot') ? 1 : 0;
+    this.world.handDown = (st.ph === 'reveal' || st.ph === 'shot' || st.ph === 'agari') ? 1 : 0;
     if (!myTurn || pending) {
       acts.classList.add('hidden');
       this.world.canSelect = false;

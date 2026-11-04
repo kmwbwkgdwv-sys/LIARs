@@ -270,21 +270,21 @@ ul.ctrl li { margin: 4px 0; }
 .gauge.h .knob { position: absolute; top: 50%; left: calc(12px + var(--v, .5) * (100% - 24px)); width: 18px; height: 22px; transform: translate(-50%, -50%); border-radius: 6px; background: #fff3d6; box-shadow: 0 1px 4px rgba(0,0,0,.7); }
 .ngLab { display: flex; justify-content: space-between; font-size: 9.5px; color: var(--mut); margin-top: 3px; white-space: nowrap; }
 @media (max-height: 560px) { .gauge.v { height: 84px; } #neckUI { bottom: calc(var(--dock-h, 0px) + 50px); } }
-#cheatPile { position: absolute; left: 0; top: 0; background: rgba(12,6,18,.8); border: 1px solid #a77bf0; border-radius: 10px; padding: 5px 8px 6px; pointer-events: none !important; z-index: 3; max-width: min(80vw, 300px); box-shadow: 0 0 16px rgba(160,100,255,.35); }
-#cheatPile .ch { font-size: 10.5px; color: #d6b8ff; font-weight: 800; white-space: nowrap; }
-#cheatPile .cr { display: flex; align-items: center; gap: 6px; margin-top: 4px; opacity: .7; }
-#cheatPile .cr.last { opacity: 1; }
-#cheatPile .cn { font-size: 11px; color: var(--txt); white-space: nowrap; max-width: 96px; overflow: hidden; text-overflow: ellipsis; }
-#cheatPile .cr.last .cn { color: var(--gold2); font-weight: 800; }
-#cheatPile .cc { display: flex; gap: 3px; }
-#cheatPile .mini-card { width: 21px; height: 30px; border-radius: 4px; }
-#cheatPile .mini-card b { font-size: 13px; }
-#cheatPile .mini-card small { display: none; }
-#cheatPile .cr.last .mini-card { width: 27px; height: 38px; }
-#cheatPile .cr.last .mini-card b { font-size: 16px; }
-#cheatPile .mini-card.joker { color: #6a2a9a; }
-#cheatPile .mini-card.lie { box-shadow: 0 0 0 2px var(--red2), 0 2px 4px rgba(0,0,0,.5); }
-#cheatPile .none { font-size: 11px; color: var(--mut); opacity: 1; }
+#pilePanel.cheat { position: absolute; left: 0; top: 0; background: rgba(12,6,18,.8); border: 1px solid #a77bf0; border-radius: 10px; padding: 5px 8px 6px; pointer-events: none !important; z-index: 3; max-width: min(80vw, 300px); box-shadow: 0 0 16px rgba(160,100,255,.35); }
+#pilePanel .ch { font-size: 10.5px; color: #d6b8ff; font-weight: 800; white-space: nowrap; }
+#pilePanel .cr { display: flex; align-items: center; gap: 6px; margin-top: 4px; opacity: .7; }
+#pilePanel .cr.last { opacity: 1; }
+#pilePanel .cn { font-size: 11px; color: var(--txt); white-space: nowrap; max-width: 96px; overflow: hidden; text-overflow: ellipsis; }
+#pilePanel .cr.last .cn { color: var(--gold2); font-weight: 800; }
+#pilePanel .cc { display: flex; gap: 3px; }
+#pilePanel .mini-card { width: 21px; height: 30px; border-radius: 4px; }
+#pilePanel .mini-card b { font-size: 13px; }
+#pilePanel .mini-card small { display: none; }
+#pilePanel .cr.last .mini-card { width: 27px; height: 38px; }
+#pilePanel .cr.last .mini-card b { font-size: 16px; }
+#pilePanel .mini-card.joker { color: #6a2a9a; }
+#pilePanel .mini-card.lie { box-shadow: 0 0 0 2px var(--red2), 0 2px 4px rgba(0,0,0,.5); }
+#pilePanel .none { font-size: 11px; color: var(--mut); opacity: 1; }
 .plabel .pd { display: none; gap: 2px; justify-content: center; margin-top: 3px; padding: 2px 3px; border-radius: 6px; background: rgba(0,0,0,.35); }
 .plabel .pd.cheat { background: rgba(120,70,200,.25); outline: 1px solid rgba(167,123,240,.6); }
 .plabel .ph { display: none; gap: 2px; justify-content: center; margin-top: 4px; }
@@ -304,3 +304,8 @@ ul.ctrl li { margin: 4px 0; }
 #bidBanner .bb-cheat.ok { color: #8dffb0; } #bidBanner .bb-cheat.ng { color: #ff8a8a; }
 .cheatTag { display: inline-block; margin-left: 6px; font-size: 12px; font-weight: 800; padding: 1px 7px; border-radius: 7px; border: 1px solid #a77bf0; background: rgba(120,70,200,.2); vertical-align: middle; }
 .cheatTag.ok { color: #8dffb0; } .cheatTag.ng { color: #ff8a8a; }
+#pilePanel { position: absolute; left: 0; top: 0; background: rgba(12,8,5,.72); border: 1px solid var(--line); border-radius: 10px; padding: 4px 8px 6px; pointer-events: none !important; z-index: 3; text-align: center; }
+#pilePanel .lpH { font-size: 11px; color: var(--mut); white-space: nowrap; }
+#pilePanel .lpH b { color: var(--gold2); font-size: 13px; }
+#pilePanel .lpC { display: flex; gap: 3px; justify-content: center; margin-top: 3px; }
+.mini-card.back { width: 22px; height: 31px; border-radius: 4px; border: 2px solid #efe6d2; background: repeating-linear-gradient(45deg, #7a1820 0 3px, #5a0f16 3px 6px); box-shadow: 0 2px 4px rgba(0,0,0,.6); }
