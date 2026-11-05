@@ -1,26 +1,38 @@
 // 通信方式その2: PeerJS（WebRTC の P2P）。GitHub Pages など claude.ai 以外で使う。
 // ホストを中心とした星型接続で、claude.ai 版の「presence」と同じ形のデータを中継する。
-import { randId } from './util.js';
 
 const PEERJS_URL = 'https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js';
+// PeerJS の既定設定と同じ（STUN ＋ PeerJS の無料 TURN 中継）。
+// 以前は STUN だけを渡していたため PeerJS の TURN が外れ、携帯回線どうし・別ネットワーク間で
+// つながらず「ロビーが見つからない」と表示されていた。
 const DEFAULT_ICE = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: ['turn:eu-0.turn.peerjs.com:3478', 'turn:us-0.turn.peerjs.com:3478'], username: 'peerjs', credential: 'peerjsp' },
 ];
+const OPEN_TIMEOUT = 20000;      // 仲介サーバーにつながるまでの待ち時間
+const CONNECT_TIMEOUT = 20000;   // ホストとの P2P 接続が開くまでの待ち時間
+const OPEN_TRIES = 3;            // 仲介サーバーが一時的に不調なときのやり直し回数
+const RETRYABLE = new Set(['network', 'server-error', 'socket-error', 'socket-closed', 'timeout']);
 
 export function p2pSupported() { return typeof window !== 'undefined' && typeof window.RTCPeerConnection !== 'undefined'; }
 
-export async function loadPeerJS() {
-  if (window.Peer) return window.Peer;
-  if (!p2pSupported()) return null;
-  await new Promise((res, rej) => {
+let peerLoad = null;
+export function loadPeerJS() {
+  if (window.Peer) return Promise.resolve(window.Peer);
+  if (!p2pSupported()) return Promise.resolve(null);
+  if (peerLoad) return peerLoad;   // 読み込み中なら同じ Promise を使う（スクリプトを二重に入れない）
+  peerLoad = new Promise((res, rej) => {
     const s = document.createElement('script');
+    let done = false;
+    const fail = (msg) => { if (done) return; done = true; s.remove(); peerLoad = null; rej({ code: 'load', message: msg }); };
+    const to = setTimeout(() => fail('PeerJS load timeout'), 15000);
     s.src = PEERJS_URL; s.async = true;
-    s.onload = res; s.onerror = () => rej(new Error('PeerJS load failed'));
+    s.onload = () => { if (done) return; done = true; clearTimeout(to); window.Peer ? res(window.Peer) : (peerLoad = null, rej({ code: 'load', message: 'PeerJS missing' })); };
+    s.onerror = () => { clearTimeout(to); fail('PeerJS load failed'); };
     document.head.appendChild(s);
-    setTimeout(() => rej(new Error('PeerJS load timeout')), 15000);
   });
-  return window.Peer || null;
+  return peerLoad;
 }
 
 function mapErr(err) {
@@ -30,6 +42,7 @@ function mapErr(err) {
   if (t === 'browser-incompatible') return { code: 'unsupported' };
   return { code: 'network', message: (err && (err.type || err.message)) || 'error' };
 }
+const wait = ms => new Promise(r => setTimeout(r, ms));
 
 export class PeerNet {
   constructor(PeerCls) {
@@ -42,25 +55,48 @@ export class PeerNet {
     this.me = null; this.role = null; this.onLost = null;
     this.pending = {}; this.flushT = 0; this.mine = {};
     this.snap = []; this.dirty = true; this.closed = false;
+    this.reconnT = 0; this.reconnDelay = 1000;
+  }
+  // 仲介サーバー（PeerJS）につなぐ。一時的な失敗は少し待ってやり直す
+  async openPeer(id) {
+    const opts = Object.assign({ debug: 0, config: { iceServers: this.cfg.iceServers || DEFAULT_ICE, sdpSemantics: 'unified-plan' } }, this.cfg.peerServer || {});
+    let last = null;
+    for (let tryNo = 1; tryNo <= OPEN_TRIES && !this.closed; tryNo++) {
+      const peer = new this.Peer(id, opts);
+      try {
+        const myId = await new Promise((res, rej) => {
+          const to = setTimeout(() => rej({ code: 'network', message: 'timeout' }), OPEN_TIMEOUT);
+          peer.on('open', pid => { clearTimeout(to); res(pid); });
+          peer.on('error', err => { if (!peer.open) { clearTimeout(to); rej(Object.assign(mapErr(err), { raw: err && err.type })); } });
+        });
+        return { peer, myId };
+      } catch (e) {
+        try { peer.destroy(); } catch (er) { /* */ }
+        last = e;
+        const retry = e.code === 'network' && (RETRYABLE.has(e.raw) || e.message === 'timeout');
+        if (!retry || tryNo === OPEN_TRIES) break;
+        console.warn('PeerJS server not ready, retrying', e);
+        await wait(1200 * tryNo);
+      }
+    }
+    throw last || { code: 'network', message: 'closed' };
   }
   async enter(key, role) {
     this.role = role;
     this.hostId = 'liarstable-' + key.slice(0, 32);
-    const opts = Object.assign({ debug: 0, config: { iceServers: this.cfg.iceServers || DEFAULT_ICE } }, this.cfg.peerServer || {});
-    const peer = this.peer = new this.Peer(role === 'host' ? this.hostId : undefined, opts);
-    let enterErr = null;
-    await new Promise((res, rej) => {
-      const to = setTimeout(() => rej({ code: 'network', message: 'timeout' }), 15000);
-      peer.on('open', id => { clearTimeout(to); this.me = id; res(); });
-      peer.on('error', err => {
-        if (!this.me) { clearTimeout(to); rej(mapErr(err)); return; }
-        const m = mapErr(err);
-        if (m.code === 'notfound' && this.connectRej) { this.connectRej(m); return; }
-        enterErr = m;
-      });
-    }).catch(async e => { this.destroy(); throw e; });
+    const { peer, myId } = await this.openPeer(role === 'host' ? this.hostId : undefined);
+    this.peer = peer; this.me = myId;
     this.states.set(this.me, this.mine);
-    peer.on('disconnected', () => { if (!this.closed) { try { peer.reconnect(); } catch (e) { /* */ } } });
+    peer.on('open', () => { this.reconnDelay = 1000; });
+    peer.on('error', err => {
+      const m = mapErr(err);
+      if (m.code === 'notfound' && this.connectRej) { this.connectRej(m); return; }
+      if (m.code !== 'notfound') console.warn('PeerJS error', err && err.type, err && err.message);
+    });
+    // 仲介サーバーとの接続が切れたら、少し間をあけてつなぎ直す（つながっている相手とのP2Pはそのまま）
+    peer.on('disconnected', () => this.scheduleReconnect());
+    this.onVis = () => { if (document.visibilityState === 'visible') this.scheduleReconnect(true); };
+    document.addEventListener('visibilitychange', this.onVis);
     if (role === 'host') {
       peer.on('connection', conn => this.accept(conn));
     } else {
@@ -68,20 +104,41 @@ export class PeerNet {
     }
     this.hb = setInterval(() => this.heartbeat(), 2000);
   }
+  scheduleReconnect(now) {
+    const peer = this.peer;
+    if (this.closed || !peer || peer.destroyed || !peer.disconnected) return;
+    if (this.reconnT) { if (!now) return; clearTimeout(this.reconnT); }
+    this.reconnT = setTimeout(() => {
+      this.reconnT = 0;
+      if (this.closed || peer.destroyed || !peer.disconnected) return;
+      try { peer.reconnect(); } catch (e) { /* */ }
+      this.reconnDelay = Math.min(this.reconnDelay * 2, 15000);
+      // まだ切れたままなら、もう一度
+      setTimeout(() => this.scheduleReconnect(), 4000);
+    }, now ? 0 : this.reconnDelay);
+  }
   connectHost() {
     return new Promise((res, rej) => {
-      const to = setTimeout(() => { this.connectRej = null; rej({ code: 'notfound' }); }, 14000);
-      this.connectRej = (e) => { clearTimeout(to); this.connectRej = null; rej(e); };
-      const conn = this.peer.connect(this.hostId, { reliable: true, serialization: 'json' });
-      conn.on('open', () => {
+      let settled = false, conn = null, to = 0;
+      const finish = (err) => {
+        if (settled) return; settled = true;
         clearTimeout(to); this.connectRej = null;
+        if (err) { try { conn && conn.close(); } catch (e) { /* */ } rej(err); } else res();
+      };
+      // 時間切れ: 仲介サーバーは「その相手はいない」と言っていない＝ホストはいるが P2P が開けなかった
+      to = setTimeout(() => finish({ code: 'p2pfail', message: 'timeout' }), CONNECT_TIMEOUT);
+      this.connectRej = (e) => finish(e);
+      conn = this.peer.connect(this.hostId, { reliable: true, serialization: 'json' });
+      if (!conn) { finish({ code: 'network', message: 'disconnected' }); return; }
+      conn.on('open', () => {
+        if (settled) return;
         this.hostConn = conn; this.lastHost = Date.now();
         conn.send({ t: 'p', d: this.mine });
-        res();
+        finish(null);
       });
       conn.on('data', d => this.onData(conn, d));
-      conn.on('close', () => this.hostGone());
-      conn.on('error', () => {});
+      conn.on('close', () => { if (!settled) finish({ code: 'p2pfail', message: 'closed' }); else if (conn === this.hostConn) this.hostGone(); });
+      conn.on('error', e => { if (!settled) finish({ code: 'p2pfail', message: (e && e.type) || 'error' }); });
     });
   }
   accept(conn) {
@@ -93,7 +150,7 @@ export class PeerNet {
       this.dirty = true;
     });
     conn.on('data', d => this.onData(conn, d));
-    conn.on('close', () => this.dropGuest(conn.peer));
+    conn.on('close', () => { const g = this.conns.get(conn.peer); if (g && g.conn === conn) this.dropGuest(conn.peer); });
     conn.on('error', () => {});
   }
   safeSend(conn, msg) { try { if (conn && conn.open) conn.send(msg); } catch (e) { /* */ } }
@@ -173,6 +230,8 @@ export class PeerNet {
     this.closed = true;
     if (this.hb) clearInterval(this.hb);
     if (this.flushT) clearTimeout(this.flushT);
+    if (this.reconnT) clearTimeout(this.reconnT);
+    if (this.onVis) document.removeEventListener('visibilitychange', this.onVis);
     try { this.peer && this.peer.destroy(); } catch (e) { /* */ }
   }
   async leave() {

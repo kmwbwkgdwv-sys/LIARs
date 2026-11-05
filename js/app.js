@@ -18,6 +18,8 @@ export const App = {
   name: 'Player', transport: null, qualityPref: 'auto', hints: true, fpsLow: 0,
 
   async init() {
+    // オンライン機能の確認が終わるまで「作成する」「参加する」を待たせるための Promise
+    this.netReady = new Promise(r => { this._netReadyRes = r; });
     this.world = new World($('#c'));
     this.world.onSelect = () => this.updateActions();
     this.world.onDiceReveal = (o) => {
@@ -51,7 +53,8 @@ export const App = {
     this.qualityPref = lsGet('lt_quality', 'auto');
     this.hints = lsGet('lt_hints', '1') === '1';
     this.applyQualityPref();
-    this.room = await getRoomCapability(window.claude ? 4000 : 1500);
+    // claude.ai の中では window.claude がページのスクリプトより先に用意される。無ければ待たずに P2P へ
+    this.room = window.claude ? await getRoomCapability(4000) : null;
     const ns = $('#netstat');
     if (this.room) { this.transport = 'room'; ns.textContent = '● オンライン対戦: 利用可能（claude.ai ルーム）'; ns.className = 'ok'; }
     else if (window.claude) {
@@ -65,7 +68,11 @@ export const App = {
       ns.innerHTML = 'このブラウザではオンライン対戦が使えません（CPU練習は可能）。';
       $('#goCreate').disabled = true; $('#goJoin').disabled = true;
     }
+    this._netReadyRes();
   },
+  // ロビーID・パスワードの表記ゆれをそろえる（日本語入力の全角英数字「ＡＢＣ１２３」→「ABC123」など）
+  normId(v) { return String(v || '').normalize('NFKC').replace(/\s+/g, '').toUpperCase(); },
+  normPw(v) { return String(v || '').normalize('NFKC').trim(); },
   async makeNet() {
     if (this.transport === 'room') return new RoomNet(this.room);
     const Peer = await loadPeerJS();
@@ -74,10 +81,12 @@ export const App = {
   },
   errText(e) {
     const c = e && e.code;
-    if (c === 'inuse') return 'このロビーIDとパスワードは既に使用中です。別のIDにしてください';
-    if (c === 'notfound') return 'ロビーが見つからないか、パスワードが違います';
+    if (c === 'inuse') return 'このロビーIDとパスワードは使用中です。別のIDにしてください（直前に同じIDで作り直した場合は、1分ほど待ってからもう一度）';
+    if (c === 'notfound') return 'ロビーが見つかりません。ロビーIDとパスワードを確認してください（ホストがロビー画面を開いたままかも確認してください）';
+    if (c === 'p2pfail') return 'ロビーは見つかりましたが、ホストとつながりませんでした。ホストがゲームの画面を開いたままか確認して、もう一度お試しください（回線の組み合わせによってはつながらないことがあります。Wi-Fiでもお試しください）';
     if (c === 'unsupported') return 'このブラウザではオンライン対戦が使えません';
-    if (c === 'network') return '接続に失敗しました（ネットワークを確認してください）';
+    if (c === 'load') return '通信ライブラリを読み込めませんでした。ネットワークや広告ブロッカーを確認して、ページを再読み込みしてください';
+    if (c === 'network') return '通信の仲介サーバーにつながりませんでした。ネットワークを確認して、少し待ってからもう一度お試しください' + (e.message ? `（${e.message}）` : '');
     return '接続に失敗しました: ' + ((e && (e.code || e.message)) || e);
   },
   // ---- 画質 ----
@@ -297,8 +306,17 @@ export const App = {
 
   // ---------------- session setup ----------------
   async lobbyKey(id, pw) {
-    const h = await Sec.hash('liars-table|v1|' + id.trim().toUpperCase() + '|' + pw);
+    const h = await Sec.hash('liars-table|v1|' + this.normId(id) + '|' + this.normPw(pw));
     return h.slice(0, 40);
+  },
+  // オンライン機能の確認がまだ終わっていなければ、終わるまで待つ（以前はここで「使えません」と失敗していた）
+  async waitNet(err) {
+    if (this.transport) return true;
+    err.textContent = 'オンライン接続を確認中…';
+    await this.netReady;
+    if (this.transport) return true;
+    err.textContent = 'オンライン機能が使えません';
+    return false;
   },
   resetSession() {
     this.st = null; this.priv = null; this.lastEv = null; this.mySeat = -1; this.hostPeer = null; this.hostPk = null; this.lastPvStr = '';
@@ -306,13 +324,16 @@ export const App = {
     this.hostMissingSince = 0;
   },
   async createLobby() {
-    const id = $('#cId').value.trim().toUpperCase(), pw = $('#cPw').value;
+    const id = this.normId($('#cId').value), pw = this.normPw($('#cPw').value);
     const err = $('#cErr'); err.textContent = '';
-    if (!/^[A-Z0-9_-]{3,16}$/.test(id)) { err.textContent = 'ロビーIDは英数字3〜16文字にしてください'; return; }
+    if (id) $('#cId').value = id;
+    if (!/^[A-Z0-9_-]{3,16}$/.test(id)) { err.textContent = 'ロビーIDは半角の英数字（A〜Z・0〜9・-・_）3〜16文字にしてください'; return; }
     if (!pw) { err.textContent = 'パスワードを入力してください'; return; }
-    if (!this.transport) { err.textContent = 'オンライン機能が使えません'; return; }
-    $('#doCreate').disabled = true; err.textContent = '接続中…';
+    if ($('#doCreate').disabled) return;
+    $('#doCreate').disabled = true;
     try {
+      if (!(await this.waitNet(err))) return;
+      err.textContent = '接続中…';
       this.resetSession();
       const net = await this.makeNet();
       net.set({ v: 1, nm: this.name, pk: Sec.pub || null });
@@ -330,12 +351,15 @@ export const App = {
     } finally { $('#doCreate').disabled = false; }
   },
   async joinLobby() {
-    const id = $('#jId').value.trim().toUpperCase(), pw = $('#jPw').value;
+    const id = this.normId($('#jId').value), pw = this.normPw($('#jPw').value);
     const err = $('#jErr'); err.textContent = '';
+    if (id) $('#jId').value = id;
     if (!id || !pw) { err.textContent = 'ロビーIDとパスワードを入力してください'; return; }
-    if (!this.transport) { err.textContent = 'オンライン機能が使えません'; return; }
-    $('#doJoin').disabled = true; err.textContent = 'ロビーを探しています…';
+    if ($('#doJoin').disabled) return;
+    $('#doJoin').disabled = true;
     try {
+      if (!(await this.waitNet(err))) return;
+      err.textContent = 'ロビーを探しています…';
       this.resetSession();
       const net = await this.makeNet();
       net.set({ v: 1, nm: this.name, role: 'guest', pk: Sec.pub || null });
@@ -932,7 +956,7 @@ export const App = {
     $('#addBot').disabled = n >= 4;
     $('#rmBot').disabled = !st.pl.some(p => p && p.b);
     let note = '';
-    if (host && this.role === 'host') note = n < 2 ? 'ロビーIDとパスワードを友達に伝えてください。CPUを追加して始めることもできます。' : '準備ができたら開始してください。';
+    if (host && this.role === 'host') note = n < 2 ? 'ロビーIDとパスワードを友達に伝えてください。CPUを追加して始めることもできます。友達が入るまで、この画面は開いたままにしてください。' : '準備ができたら開始してください。';
     else if (!host) note = this.mySeat >= 0 ? 'ホストの開始を待っています…' : '満席のため観戦します。';
     $('#lobbyNote').textContent = note;
   },
